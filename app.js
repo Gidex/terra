@@ -13,6 +13,8 @@
     { name: 'Wetlands', color: '#508b83', tempMin: 2, tempMax: 32, moistureMin: .78, moistureMax: 1, elevationMin: 0, elevationMax: .72, enabled: true },
     { name: 'Mediterranean', color: '#9c9b5c', tempMin: 10, tempMax: 34, moistureMin: .28, moistureMax: .7, elevationMin: 0, elevationMax: .82, enabled: true },
     { name: 'Alpine', color: '#d0d4cd', tempMin: -25, tempMax: 12, moistureMin: 0, moistureMax: 1, elevationMin: .58, elevationMax: 1, enabled: true },
+    { name: 'Beach', color: '#ded3a2', tempMin: -5, tempMax: 45, moistureMin: 0, moistureMax: 1, elevationMin: 0, elevationMax: .038, enabled: true },
+    { name: 'Rock cliff', color: '#7a7672', tempMin: -35, tempMax: 50, moistureMin: 0, moistureMax: 1, elevationMin: .12, elevationMax: 1, enabled: true },
     { name: 'Ocean', color: '#315a67', tempMin: -30, tempMax: 45, moistureMin: 0, moistureMax: 1, elevationMin: -1, elevationMax: 0, enabled: true }
   ];
   const WATER_BIOME_PRESETS = [
@@ -21,7 +23,7 @@
     { name: 'Deep Ocean', color: '#12345e', tempMin: -2, tempMax: 25, moistureMin: 0, moistureMax: 1, elevationMin: -1, elevationMax: -.35, enabled: true }
   ];
   const BIOME_PRESETS = [...DEFAULT_BIOMES, ...WATER_BIOME_PRESETS];
-  const STARTER_BIOME_NAMES = ['Temperate forest', 'Grassland', 'Desert', 'Alpine', 'Ocean'];
+  const STARTER_BIOME_NAMES = ['Beach', 'Temperate forest', 'Grassland', 'Desert', 'Alpine', 'Ocean'];
   function createSeed() { const value = globalThis.crypto?.getRandomValues ? globalThis.crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 4294967296); return `TERRA-${value.toString(16).toUpperCase().padStart(8, '0')}`; }
   const state = { size: 2017, seed: createSeed(), terrain: 'island', view: 'height', view3DYaw: -.72, orbitDrag: null, biomes: structuredClone(BIOME_PRESETS.filter(b => STARTER_BIOME_NAMES.includes(b.name))), distribution: 'natural', climateOffset: 0, temperatureUnit: 'C', features: { rivers: 0, lakes: 0, roads: 0, cities: 0, villages: 0, peaks: 0 }, drawn: [], drawType: 'river', brush: 3, grid: true, zoom: 1, height: null, wet: null, temp: null, biomeMap: null, hoverPoint: null, elevation: null, time: 0, mapName: 'Untitled landscape' };
   const canvas = $('#mapCanvas'), ctx = canvas.getContext('2d', { alpha: false });
@@ -38,40 +40,207 @@
   function workerTerrain(params) {
     return new Promise((resolve, reject) => { const id = ++workerRequestId; workerWaiters.set(id, { resolve, reject }); terrainWorker.postMessage({ ...params, id }); });
   }
-  function generateTerrainFallback({ size, seed, terrain, rough, erosion, islandSize, canyonWidth, ridgeStrength }) {
-    const heights = new Float32Array(size * size), rng = mulberry32(seed);
-    const centers = Array.from({ length: 5 }, () => ({ x: .2 + rng() * .6, y: .2 + rng() * .6, r: .08 + rng() * .17, h: .35 + rng() * .65 }));
-    const a = { x: .1 + rng() * .15, y: .1 + rng() * .8 }, b = { x: .75 + rng() * .2, y: .1 + rng() * .8 };
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-      const nx = x / (size - 1), ny = y / (size - 1), r = Math.hypot(nx - .5, ny - .5) * 1.414, n = fractal(nx * (4 + rough * 5), ny * (4 + rough * 5), seed), detail = (n - .49) * rough * .25; let base = .36, mask = 1;
-      switch (terrain) {
-        case 'island': case 'archipelago': { let land = Math.max(0, 1 - smooth(.38 / islandSize, .98 / islandSize, r)); if (terrain === 'archipelago') { land = 0; for (const c of centers) land = Math.max(land, c.h * (1 - smooth(c.r * islandSize * .55, c.r * islandSize * 1.55, Math.hypot(nx - c.x, ny - c.y)))); } base = .02 + land * (.52 + .27 * rough * n) + detail; break; }
-        case 'canyon': { const d = distToPath(nx, ny, [a, { x: .42, y: .45 }, { x: .67, y: .55 }, b]); base = .24 + smooth(canyonWidth, canyonWidth * 3.2, d) * .62 + detail * 1.2 - .22 * (1 - smooth(canyonWidth * .6, canyonWidth * 1.5, d)); break; }
-        case 'highland': base = .3 + smooth(.24, .7, r) * (.2 + ridgeStrength * .55) + .32 - .16 * (1 - smooth(.04, .36, r)) + detail; break;
-        case 'volcanic': base = .31 + .42 * smooth(.27, .62, r) - .25 * Math.exp(-Math.pow(r / .28, 2)) + detail; break;
-        case 'coastal': base = (.1 + smooth(.08, .9, nx) * .32 + smooth(.2, .75, ny) * .16 + detail) * (mask = smooth(.02, .2, nx)); break;
-        case 'plateau': base = .32 + .31 * smooth(.08, .35, n) + .04 * (n - .5) + detail * .55 - .18 * smooth(.65, 1, r); break;
-        case 'valley': { const d = Math.abs(ny - (.49 + .09 * Math.sin(nx * 5.4) + .035 * Math.sin(nx * 14))); base = .6 + detail + .2 * rough * n - .33 * (1 - smooth(.025, .21, d)); break; }
-        case 'mesa': { let m = 0; for (const c of centers) m = Math.max(m, c.h * (1 - smooth(c.r * .78, c.r * 1.08, Math.hypot(nx - c.x, ny - c.y)))); base = .13 + m * .68 + detail * .7; break; }
-        case 'dunes': { const ridge = Math.abs(Math.sin(nx * 35 + ny * 8 + fractal(nx * 2, ny * 2, seed) * 5)); base = .34 + (1 - ridge) * .25 + Math.sin(nx * 8 + ny * 12) * .025 + detail * .3; break; }
-        case 'fjord': { const inlet = Math.abs(nx - (.49 + .08 * Math.sin(ny * 5.4) + .025 * Math.sin(ny * 14))); base = .2 + smooth(.012, .115, inlet) * .68 + detail * 1.1; break; }
-      }
-      const h = clamp((base + detail * .45) * mask); heights[y * size + x] = lerp(h, smooth(.18, .86, h), erosion * .22);
-    }
-    return heights;
-  }
+
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
   const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a)); return t * t * (3 - 2 * t); };
   const lerp = (a, b, t) => a + (b - a) * t;
   const hashText = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
   const mulberry32 = (a) => () => { let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-  const hash = (x, y, seed) => { let n = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 1442695041); n = Math.imul(n ^ n >>> 13, 1274126177); return ((n ^ n >>> 16) >>> 0) / 4294967295; };
-  function noise(x, y, seed) {
-    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
-    const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
-    return lerp(lerp(hash(ix, iy, seed), hash(ix + 1, iy, seed), u), lerp(hash(ix, iy + 1, seed), hash(ix + 1, iy + 1, seed), u), v);
+  const hash = (x, y, seed = 0) => { let n = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 1442695041); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967295; };
+
+  // 8 2D unit gradient vectors for smooth Perlin gradient noise
+  const GX = [1, -1, 0, 0, 0.70710678, -0.70710678, 0.70710678, -0.70710678];
+  const GY = [0, 0, 1, -1, 0.70710678, 0.70710678, -0.70710678, -0.70710678];
+
+  function gradNoise(x, y, seed) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+    const v = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+
+    let n00 = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(seed, 1442695041);
+    n00 = Math.imul(n00 ^ (n00 >>> 13), 1274126177);
+    const g00 = (n00 >>> 29) & 7;
+    const d00 = GX[g00] * fx + GY[g00] * fy;
+
+    let n10 = Math.imul(ix + 1, 374761393) + Math.imul(iy, 668265263) + Math.imul(seed, 1442695041);
+    n10 = Math.imul(n10 ^ (n10 >>> 13), 1274126177);
+    const g10 = (n10 >>> 29) & 7;
+    const d10 = GX[g10] * (fx - 1) + GY[g10] * fy;
+
+    let n01 = Math.imul(ix, 374761393) + Math.imul(iy + 1, 668265263) + Math.imul(seed, 1442695041);
+    n01 = Math.imul(n01 ^ (n01 >>> 13), 1274126177);
+    const g01 = (n01 >>> 29) & 7;
+    const d01 = GX[g01] * fx + GY[g01] * (fy - 1);
+
+    let n11 = Math.imul(ix + 1, 374761393) + Math.imul(iy + 1, 668265263) + Math.imul(seed, 1442695041);
+    n11 = Math.imul(n11 ^ (n11 >>> 13), 1274126177);
+    const g11 = (n11 >>> 29) & 7;
+    const d11 = GX[g11] * (fx - 1) + GY[g11] * (fy - 1);
+
+    const nx0 = d00 + u * (d10 - d00);
+    const nx1 = d01 + u * (d11 - d01);
+    return (nx0 + v * (nx1 - nx0)) * 0.70710678 + 0.5;
   }
-  function fractal(x, y, seed) { let sum = 0, amp = .52, freq = 1, norm = 0; for (let i = 0; i < 5; i++) { sum += noise(x * freq, y * freq, seed + i * 311) * amp; norm += amp; amp *= .52; freq *= 2.03; } return sum / norm; }
+  const noise = gradNoise;
+
+  function fractal(x, y, seed, octaves = 5) {
+    let sum = 0, amp = .52, freq = 1, norm = 0;
+    for (let i = 0; i < octaves; i++) {
+      sum += gradNoise(x * freq, y * freq, seed + i * 311) * amp;
+      norm += amp;
+      amp *= .52;
+      freq *= 2.03;
+    }
+    return sum / norm;
+  }
+
+  function ridgedFractal(x, y, seed, octaves = 4) {
+    let sum = 0, amp = .55, freq = 1, norm = 0;
+    for (let i = 0; i < octaves; i++) {
+      let n = gradNoise(x * freq, y * freq, seed + i * 401);
+      n = 1 - Math.abs(n * 2 - 1);
+      n = n * n;
+      sum += n * amp;
+      norm += amp;
+      amp *= 0.5;
+      freq *= 2.04;
+    }
+    return sum / norm;
+  }
+
+  function generateTerrainFallback({ size, seed, terrain, rough, erosion, islandSize, canyonWidth, ridgeStrength }) {
+    const heights = new Float32Array(size * size), seedR = mulberry32(seed);
+    const centers = Array.from({ length: 5 }, () => ({ x: .2 + seedR() * .6, y: .2 + seedR() * .6, r: .08 + seedR() * .17, h: .35 + seedR() * .65 }));
+    const ridgeA = { x: .1 + seedR() * .15, y: .1 + seedR() * .8 }, ridgeB = { x: .75 + seedR() * .2, y: .1 + seedR() * .8 };
+    const branchC = { x: .42 + seedR() * .15, y: .46 + seedR() * .1 }, branchD = { x: .32 + seedR() * .35, y: seedR() > 0.5 ? 0.85 : 0.15 };
+
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      const nx = x / (size - 1), ny = y / (size - 1), dx = nx - .5, dy = ny - .5;
+      const wx = (fractal(nx * 2.5, ny * 2.5, seed ^ 0x51f, 3) - 0.5) * 0.35;
+      const wy = (fractal(nx * 2.5 + 8.1, ny * 2.5 - 4.3, seed ^ 0x93c, 3) - 0.5) * 0.35;
+      const rWarp = Math.hypot(dx + wx, dy + wy) * 1.414;
+      const rPure = Math.hypot(dx, dy) * 1.414;
+
+      const n = fractal(nx * (4 + rough * 5), ny * (4 + rough * 5), seed);
+      const detail = (n - .49) * rough * .25;
+      let base = .36, mask = 1;
+
+      switch (terrain) {
+        case 'island': {
+          const land = Math.max(0, 1 - smooth(.38 / islandSize, .98 / islandSize, rWarp));
+          const mountainRidge = ridgedFractal(nx * (3 + rough * 3), ny * (3 + rough * 3), seed ^ 0x777, 4);
+          base = .02 + land * (.48 + .3 * rough * n + mountainRidge * land * .25) + detail;
+          break;
+        }
+        case 'archipelago': {
+          let land = 0;
+          for (const c of centers) {
+            const cDist = Math.hypot((nx + wx * 0.7) - c.x, (ny + wy * 0.7) - c.y);
+            land = Math.max(land, c.h * (1 - smooth(c.r * islandSize * .55, c.r * islandSize * 1.55, cDist)));
+          }
+          base = .02 + land * (.52 + .27 * rough * n) + detail;
+          break;
+        }
+        case 'canyon': {
+          const dMain = distToPath(nx, ny, [ridgeA, { x: .42, y: .45 }, { x: .67, y: .55 }, ridgeB]);
+          const dBranch = distToPath(nx, ny, [branchC, branchD]);
+          const d = Math.min(dMain, dBranch * 1.35);
+          const rawCanyon = smooth(canyonWidth, canyonWidth * 3.2, d) * .62;
+          const terraced = Math.floor(rawCanyon * 6) / 6 + smooth(0.2, 0.8, (rawCanyon * 6) % 1) * (1 / 6);
+          base = .24 + terraced + detail * 1.1 - .22 * (1 - smooth(canyonWidth * .6, canyonWidth * 1.5, d));
+          break;
+        }
+        case 'highland': {
+          const rim = smooth(.24, .7, rPure) * (.2 + ridgeStrength * .55);
+          const basin = .32 - .16 * (1 - smooth(.04, .36, rPure));
+          const ridges = ridgedFractal(nx * (3.5 + rough * 3), ny * (3.5 + rough * 3), seed ^ 0x89a, 4);
+          base = .28 + rim + basin + detail * 0.6 + ridges * (0.22 + ridgeStrength * 0.38);
+          break;
+        }
+        case 'volcanic': {
+          const cone = smooth(0.04, 0.42, rPure);
+          const rim = smooth(0.18, 0.32, rPure) * 0.45;
+          const calderaDepression = Math.exp(-Math.pow(rPure / 0.22, 2)) * 0.36;
+          const centralPeak = Math.exp(-Math.pow(rPure / 0.055, 2)) * 0.18;
+          base = 0.25 + cone * 0.15 + rim - calderaDepression + centralPeak + detail;
+          break;
+        }
+        case 'coastal': {
+          const shelfWarp = nx + wy * 0.3;
+          base = (.1 + smooth(.08, .9, shelfWarp) * .32 + smooth(.2, .75, ny) * .16 + detail);
+          mask = smooth(.02, .2, shelfWarp);
+          base *= mask;
+          break;
+        }
+        case 'plateau': {
+          const pNoise = fractal(nx * 3.5, ny * 3.5, seed);
+          const stepped = smooth(.12, .42, pNoise);
+          base = .32 + .32 * stepped + .04 * (n - .5) + detail * .55 - .18 * smooth(.65, 1, rWarp);
+          break;
+        }
+        case 'valley': {
+          const riverMeander = ny - (.49 + .09 * Math.sin(nx * 5.4 + wx * 2) + .035 * Math.sin(nx * 14));
+          const d = Math.abs(riverMeander);
+          base = .6 + detail + .2 * rough * n - .35 * (1 - smooth(.025, .22, d));
+          break;
+        }
+        case 'mesa': {
+          let mesas = 0;
+          for (const c of centers) {
+            const cDist = Math.hypot((nx + wx * 0.5) - c.x, (ny + wy * 0.5) - c.y);
+            const rawMesa = 1 - smooth(c.r * .78, c.r * 1.08, cDist);
+            const steppedMesa = smooth(0.35, 0.95, rawMesa);
+            mesas = Math.max(mesas, c.h * steppedMesa);
+          }
+          base = .13 + mesas * .68 + detail * .7;
+          break;
+        }
+        case 'dunes': {
+          const dPhase = nx * 32 + ny * 8 + fractal(nx * 2, ny * 2, seed) * 4.5;
+          const normPhase = (dPhase % (Math.PI * 2) + (Math.PI * 2)) % (Math.PI * 2);
+          const ridge = Math.pow(Math.sin(normPhase * 0.5), 1.6);
+          base = .34 + ridge * .25 + Math.sin(nx * 8 + ny * 12) * .025 + detail * .3;
+          break;
+        }
+        case 'fjord': {
+          const inlet = Math.abs((nx + wy * 0.25) - (.49 + .08 * Math.sin(ny * 5.4) + .025 * Math.sin(ny * 14)));
+          base = .2 + smooth(.012, .115, inlet) * .68 + detail * 1.1;
+          break;
+        }
+      }
+      const h = clamp((base + detail * .45) * mask);
+      heights[y * size + x] = h;
+    }
+
+    if (erosion > 0) {
+      const maxSlope = 0.055 - erosion * 0.035;
+      const passes = Math.min(3, Math.max(1, Math.round(erosion * 2.5)));
+      const rate = 0.25;
+      for (let p = 0; p < passes; p++) {
+        for (let y = 1; y < size - 1; y++) {
+          for (let x = 1; x < size - 1; x++) {
+            const i = y * size + x;
+            const h = heights[i];
+            const nT = heights[(y - 1) * size + x], nB = heights[(y + 1) * size + x];
+            const nL = heights[y * size + (x - 1)], nR = heights[y * size + (x + 1)];
+            const minN = Math.min(nT, nB, nL, nR);
+            const diff = h - minN;
+            if (diff > maxSlope) {
+              const transfer = (diff - maxSlope) * rate;
+              heights[i] -= transfer;
+              if (minN === nT) heights[(y - 1) * size + x] += transfer;
+              else if (minN === nB) heights[(y + 1) * size + x] += transfer;
+              else if (minN === nL) heights[y * size + (x - 1)] += transfer;
+              else heights[y * size + (x + 1)] += transfer;
+            }
+          }
+        }
+      }
+    }
+
+    return heights;
+  }
   function readSettings() {
     return { peak: +$('#elevation').value, shapeHeight: +$('#shapeHeight').value / 100, rough: +$('#roughness').value / 100, erosion: +$('#erosion').value / 100, sea: +$('#seaLevel').value / 100, flatten: $('#flattenSettlements').checked, auto: $('#autoFeatures').checked, islandSize: +$('#islandSize').value / 100, canyonWidth: +$('#canyonWidth').value / 100, ridgeStrength: +$('#ridgeStrength').value / 100, quality: +$('#quality').value, climateOffsetC: state.climateOffset, temperatureUnit: state.temperatureUnit };
   }
@@ -199,7 +368,7 @@
         const step = Math.hypot(ox, oy), slope = Math.abs(h1 - h0);
         // Small seeded terrain roughness breaks up the geometric shortest path
         // while preserving a preference for gentle slopes and dry ground.
-        const wx = nx / 63, wy = ny / 63, wander = noise(wx * 8, wy * 8, seed) * 2.1;
+        const wx = nx / 63, wy = ny / 63, wander = gradNoise(wx * 8, wy * 8, seed) * 2.1;
         const riverClearance = riverDistance(wx, wy);
         if (!allowRiverCrossing && riverClearance < .009) continue;
         const riverPenalty = riverClearance < .018 ? (1 - riverClearance / .018) * (allowRiverCrossing ? 65 : 28) : 0;
@@ -304,62 +473,103 @@
     const request = ++generationToken;
     requestAnimationFrame(async () => {
       if (request !== generationToken) return;
-      const cfg = readSettings(), seed = hashText($('#seed').value || 'TERRA'); state.seed = $('#seed').value || 'TERRA';
-      const generationSize = +$('#quality').value;
-      const auto = cfg.auto ? makeAutoFeatures(seed) : { areas: [] };
-      const features = [...state.drawn]; const areas = [...auto.areas, ...state.drawn.filter(x => ['lake', 'city', 'village', 'mountain'].includes(x.type)).map(x => ({ type: x.type, x: x.x, y: x.y, radius: x.radius || .025 }))];
-      const terrainParams = { size: generationSize, seed, terrain: state.terrain, rough: cfg.rough, erosion: cfg.erosion, islandSize: cfg.islandSize, canyonWidth: cfg.canyonWidth, ridgeStrength: cfg.ridgeStrength };
-      let heights;
-      try { heights = terrainWorker && !workerUnavailable ? await workerTerrain(terrainParams) : generateTerrainFallback(terrainParams); }
-      catch (error) { console.warn('Terrain worker failed; retrying locally.', error); try { heights = generateTerrainFallback(terrainParams); workerUnavailable = true; } catch (fallbackError) { if (request === generationToken) { $('#loading').style.display = 'none'; $('#statusText').textContent = 'GENERATION FAILED'; showToast(fallbackError.message || 'Terrain generation failed'); } return; } }
-      if (request !== generationToken) return;
-      if (cfg.shapeHeight !== 1) for (let i = 0; i < heights.length; i++) heights[i] = clamp(cfg.sea + (heights[i] - cfg.sea) * cfg.shapeHeight);
-      // Assign SIZE only after the token check so a stale async branch
-      // never overwrites the value used by a newer, still-running generation.
-      SIZE = generationSize;
-      const moisture = new Float32Array(SIZE * SIZE), temp = new Float32Array(SIZE * SIZE);
-      const sampleBase = (x, y) => heights[Math.round(clamp(y) * (SIZE - 1)) * SIZE + Math.round(clamp(x) * (SIZE - 1))];
-      const isDry = (x, y) => sampleBase(x, y) > cfg.sea + .025;
-      const settlements = [], placedAreas = [];
-      for (const a of areas) {
-        const needsLand = ['city', 'village', 'mountain', 'lake'].includes(a.type);
-        const conflicts = (x, y) => placedAreas.some(b => Math.hypot(b.x - x, b.y - y) < (b.radius + a.radius) * 1.22);
-        if (!needsLand) continue;
-        if (isDry(a.x, a.y) && !conflicts(a.x, a.y)) { placedAreas.push(a); if (['city', 'village'].includes(a.type)) settlements.push(a); continue; }
-        let found = null;
-        for (let radius = .012; radius <= .85 && !found; radius += .012) {
-          const steps = Math.max(16, Math.ceil(radius * SIZE * 6));
-          for (let step = 0; step < steps; step++) { const angle = step / steps * Math.PI * 2, x = a.x + Math.cos(angle) * radius, y = a.y + Math.sin(angle) * radius; if (x <= .02 || x >= .98 || y <= .02 || y >= .98 || !isDry(x, y) || conflicts(x, y)) continue; found = { x, y }; break; }
+      try {
+        const cfg = readSettings(), seed = hashText($('#seed').value || 'TERRA'); state.seed = $('#seed').value || 'TERRA';
+        const generationSize = +$('#quality').value;
+        const auto = cfg.auto ? makeAutoFeatures(seed) : { areas: [] };
+        const features = [...state.drawn]; const areas = [...auto.areas, ...state.drawn.filter(x => ['lake', 'city', 'village', 'mountain'].includes(x.type)).map(x => ({ type: x.type, x: x.x, y: x.y, radius: x.radius || .025 }))];
+        const terrainParams = { size: generationSize, seed, terrain: state.terrain, rough: cfg.rough, erosion: cfg.erosion, islandSize: cfg.islandSize, canyonWidth: cfg.canyonWidth, ridgeStrength: cfg.ridgeStrength };
+        let heights;
+        try { heights = terrainWorker && !workerUnavailable ? await workerTerrain(terrainParams) : generateTerrainFallback(terrainParams); }
+        catch (error) { console.warn('Terrain worker failed; retrying locally.', error); try { heights = generateTerrainFallback(terrainParams); workerUnavailable = true; } catch (fallbackError) { if (request === generationToken) { $('#loading').style.display = 'none'; $('#statusText').textContent = 'GENERATION FAILED'; showToast(fallbackError.message || 'Terrain generation failed'); } return; } }
+        if (request !== generationToken) return;
+        if (cfg.shapeHeight !== 1) for (let i = 0; i < heights.length; i++) heights[i] = clamp(cfg.sea + (heights[i] - cfg.sea) * cfg.shapeHeight);
+        // Assign SIZE only after the token check so a stale async branch
+        // never overwrites the value used by a newer, still-running generation.
+        SIZE = generationSize;
+        const moisture = new Float32Array(SIZE * SIZE), temp = new Float32Array(SIZE * SIZE);
+        const sampleBase = (x, y) => heights[Math.round(clamp(y) * (SIZE - 1)) * SIZE + Math.round(clamp(x) * (SIZE - 1))];
+        const isDry = (x, y) => sampleBase(x, y) > cfg.sea + .025;
+        const settlements = [], placedAreas = [];
+        for (const a of areas) {
+          const needsLand = ['city', 'village', 'mountain', 'lake'].includes(a.type);
+          const conflicts = (x, y) => placedAreas.some(b => Math.hypot(b.x - x, b.y - y) < (b.radius + a.radius) * 1.22);
+          if (!needsLand) continue;
+          if (isDry(a.x, a.y) && !conflicts(a.x, a.y)) { placedAreas.push(a); if (['city', 'village'].includes(a.type)) settlements.push(a); continue; }
+          let found = null;
+          for (let radius = .012; radius <= .85 && !found; radius += .012) {
+            const steps = Math.max(16, Math.ceil(radius * SIZE * 6));
+            for (let step = 0; step < steps; step++) { const angle = step / steps * Math.PI * 2, x = a.x + Math.cos(angle) * radius, y = a.y + Math.sin(angle) * radius; if (x <= .02 || x >= .98 || y <= .02 || y >= .98 || !isDry(x, y) || conflicts(x, y)) continue; found = { x, y }; break; }
+          }
+          if (found) { a.x = found.x; a.y = found.y; placedAreas.push(a); if (['city', 'village'].includes(a.type)) settlements.push(a); }
+          else a.hidden = true;
         }
-        if (found) { a.x = found.x; a.y = found.y; placedAreas.push(a); if (['city', 'village'].includes(a.type)) settlements.push(a); }
-        else a.hidden = true;
-      }
-      const generatedRivers = cfg.auto && state.features.rivers ? buildRiverPaths(seed, heights, cfg.sea, state.terrain, state.features.rivers) : [];
-      features.push(...generatedRivers);
-      let generatedRoads = [];
-      if (cfg.auto && state.features.roads) {
-        generatedRoads = buildRoadPaths(seed, heights, cfg.sea, areas, state.features.roads, features.filter(feature => feature.type === 'river'));
-        features.push(...generatedRoads);
-      }
-      for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
-        const nx = x / (SIZE - 1), ny = y / (SIZE - 1), idx = y * SIZE + x; let h = heights[idx];
-        if (h > cfg.sea) for (const a of areas) {
-          if (a.hidden) continue;
-          const d = Math.hypot(nx - a.x, ny - a.y), t = Math.exp(-Math.pow(d / a.radius, 2));
-          if (a.type === 'mountain') h = clamp(h + t * .28);
-          if ((a.type === 'city' || a.type === 'village') && cfg.flatten && t > .01) h = lerp(h, Math.min(.92, Math.max(cfg.sea + .04, .32 + fractal(nx * 4, ny * 4, seed) * .025)), t * .96);
-          if (a.type === 'lake' && d < a.radius && !settlements.some(s => Math.hypot(nx - s.x, ny - s.y) < s.radius * 1.25)) h = Math.min(h, cfg.sea * .93);
+        const generatedRivers = cfg.auto && state.features.rivers ? buildRiverPaths(seed, heights, cfg.sea, state.terrain, state.features.rivers) : [];
+        features.push(...generatedRivers);
+        let generatedRoads = [];
+        if (cfg.auto && state.features.roads) {
+          generatedRoads = buildRoadPaths(seed, heights, cfg.sea, areas, state.features.roads, features.filter(feature => feature.type === 'river'));
+          features.push(...generatedRoads);
         }
-        if (h > cfg.sea) for (const f of features) if (f.type === 'river') { const d = distToPath(nx, ny, f.pts); const width = f.width || .006; if (d < width * 2.4) { const cut = 1 - smooth(width * .35, width * 2.4, d); h = Math.min(h, lerp(cfg.sea + .015, h, 1 - cut * .8)); } }
-        heights[idx] = h;
-        moisture[idx] = clamp(.55 + (fractal(nx * 4 + 30, ny * 4 - 9, seed ^ 719) - .5) * .9 - nx * .13);
-        temp[idx] = clamp(.92 - Math.abs(ny - .5) * .9 - h * .45 + (fractal(nx * 2, ny * 2, seed ^ 493) - .5) * .12);
+        for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
+          const nx = x / (SIZE - 1), ny = y / (SIZE - 1), idx = y * SIZE + x; let h = heights[idx];
+          if (h > cfg.sea) for (const a of areas) {
+            if (a.hidden) continue;
+            const d = Math.hypot(nx - a.x, ny - a.y), t = Math.exp(-Math.pow(d / a.radius, 2));
+            if (a.type === 'mountain') h = clamp(h + t * .28);
+            if ((a.type === 'city' || a.type === 'village') && cfg.flatten && t > .01) h = lerp(h, Math.min(.92, Math.max(cfg.sea + .04, .32 + fractal(nx * 4, ny * 4, seed) * .025)), t * .96);
+            if (a.type === 'lake' && d < a.radius && !settlements.some(s => Math.hypot(nx - s.x, ny - s.y) < s.radius * 1.25)) h = Math.min(h, cfg.sea * .93);
+          }
+          if (h > cfg.sea) for (const f of features) if (f.type === 'river') {
+            const d = distToPath(nx, ny, f.pts);
+            const width = f.width || .006;
+            if (d < width * 2.4) {
+              const cut = 1 - smooth(width * .35, width * 2.4, d);
+              const channelDepth = 0.032;
+              const bed = Math.max(cfg.sea + 0.006, h - channelDepth);
+              h = lerp(h, bed, cut * 0.85);
+            }
+          }
+          heights[idx] = h;
+        }
+        for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
+          const nx = x / (SIZE - 1), ny = y / (SIZE - 1), idx = y * SIZE + x;
+          const h = heights[idx];
+          const xP = Math.max(0, x - 1), xN = Math.min(SIZE - 1, x + 1);
+          const windSlope = (heights[y * SIZE + xN] - heights[y * SIZE + xP]) * 5;
+          const orographic = windSlope > 0 ? windSlope * 0.22 : windSlope * 0.16;
+          const coastal = (h > cfg.sea && h < cfg.sea + 0.05) ? (1 - (h - cfg.sea) / 0.05) * 0.12 : 0;
+          let m = clamp(.52 + (fractal(nx * 4 + 30, ny * 4 - 9, seed ^ 719) - .5) * .85 + orographic + coastal - nx * .09);
+          if (h > cfg.sea) {
+            for (const f of features) {
+              if (f.type === 'river') {
+                const dR = distToPath(nx, ny, f.pts);
+                if (dR < 0.024) m = Math.min(1, m + (1 - dR / 0.024) * 0.32);
+              }
+            }
+            for (const a of areas) {
+              if (!a.hidden && a.type === 'lake') {
+                const dL = Math.hypot(nx - a.x, ny - a.y);
+                if (dL < a.radius * 1.5) m = Math.min(1, m + (1 - dL / (a.radius * 1.5)) * 0.24);
+              }
+            }
+          }
+          moisture[idx] = m;
+          temp[idx] = clamp(.92 - Math.abs(ny - .5) * .9 - h * .45 + (fractal(nx * 2, ny * 2, seed ^ 493) - .5) * .12);
+        }
+        state.height = heights; state.wet = moisture; state.temp = temp; state.featuresGenerated = features; state.areasGenerated = areas; state.elevation = cfg.peak;
+        const placedTypeCount = type => auto.areas.filter(a => a.type === type && !a.hidden).length;
+        $('#featureStatus').textContent = cfg.auto ? `Placed: rivers ${generatedRivers.length}/${state.features.rivers}, roads ${generatedRoads.length}/${state.features.roads}, lakes ${placedTypeCount('lake')}/${state.features.lakes}, peaks ${placedTypeCount('mountain')}/${state.features.peaks}, cities ${placedTypeCount('city')}/${state.features.cities}, villages ${placedTypeCount('village')}/${state.features.villages}.` : 'Automatic placement is off.';
+        assignBiomes(cfg.sea); render(); drawOverlays(); drawProfile(); updateStats();
+        state.time = performance.now() - started; $('#generationTime').textContent = `${(state.time / 1000).toFixed(1)}s`; $('#statusText').textContent = 'WORLD READY'; $('#loading').style.display = 'none';
+      } catch (err) {
+        console.error('Generation error:', err);
+        if (request === generationToken) {
+          $('#loading').style.display = 'none';
+          $('#statusText').textContent = 'GENERATION FAILED';
+          showToast(err.message || 'Generation failed');
+        }
       }
-      state.height = heights; state.wet = moisture; state.temp = temp; state.featuresGenerated = features; state.areasGenerated = areas; state.elevation = cfg.peak;
-      const placedTypeCount = type => auto.areas.filter(a => a.type === type && !a.hidden).length;
-      $('#featureStatus').textContent = cfg.auto ? `Placed: rivers ${generatedRivers.length}/${state.features.rivers}, roads ${generatedRoads.length}/${state.features.roads}, lakes ${placedTypeCount('lake')}/${state.features.lakes}, peaks ${placedTypeCount('mountain')}/${state.features.peaks}, cities ${placedTypeCount('city')}/${state.features.cities}, villages ${placedTypeCount('village')}/${state.features.villages}.` : 'Automatic placement is off.';
-      assignBiomes(cfg.sea); render(); drawOverlays(); drawProfile(); updateStats();
-      state.time = performance.now() - started; $('#generationTime').textContent = `${(state.time / 1000).toFixed(1)}s`; $('#statusText').textContent = 'WORLD READY'; $('#loading').style.display = 'none';
     });
   }
   function assignBiomes(sea) {
@@ -369,10 +579,14 @@
     const waterFallback = waterBiomes[0] || enabled[0], landCandidates = landBiomes.length ? landBiomes : enabled;
     const relativeElevation = h => h < sea ? -clamp((sea - h) / Math.max(sea, .01)) : clamp((h - sea) / Math.max(1 - sea, .01));
     const bestMatch = (candidates, i) => {
+      const x = i % SIZE, y = Math.floor(i / SIZE);
+      const hL = state.height[y * SIZE + Math.max(0, x - 1)], hR = state.height[y * SIZE + Math.min(SIZE - 1, x + 1)];
+      const hT = state.height[Math.max(0, y - 1) * SIZE + x], hB = state.height[Math.min(SIZE - 1, y + 1) * SIZE + x];
+      const slope = Math.hypot((hR - hL) * 35, (hB - hT) * 35);
       const tempC = state.temp[i] * 55 - 20 + state.climateOffset, moisture = state.wet[i], elevation = relativeElevation(state.height[i]);
       let bestIndex = state.biomes.indexOf(candidates[0]), bestScore = Infinity;
       for (const biome of candidates) {
-        const score = scoreBiomeProfile(biome, tempC, moisture, elevation);
+        const score = scoreBiomeProfile(biome, tempC, moisture, elevation, slope);
         if (score < bestScore) { bestScore = score; bestIndex = state.biomes.indexOf(biome); }
       }
       return Math.max(0, bestIndex);
@@ -421,12 +635,26 @@
     if (state.height) { assignBiomes(readSettings().sea); render(); drawOverlays(); }
   }
   const hexRgb = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-  function rangeScore(value, min, max, minimumHalfRange) { const center = (min + max) * .5, half = Math.max(minimumHalfRange, (max - min) * .5); return Math.pow((value - center) / half, 2); }
-  function scoreBiomeProfile(biome, tempC, moisture, landElevation) {
+  function envelopeScore(value, min, max, tolerance) {
+    if (value >= min && value <= max) {
+      const center = (min + max) * 0.5, span = Math.max(0.01, (max - min) * 0.5);
+      return Math.pow((value - center) / span, 2) * 0.12;
+    }
+    const dist = value < min ? min - value : value - max;
+    return Math.pow(dist / Math.max(tolerance, 0.01), 2);
+  }
+  function scoreBiomeProfile(biome, tempC, moisture, landElevation, slope = 0) {
     const t0 = Number.isFinite(biome.tempMin) ? biome.tempMin : -20, t1 = Number.isFinite(biome.tempMax) ? biome.tempMax : 35;
     const m0 = Number.isFinite(biome.moistureMin) ? biome.moistureMin : 0, m1 = Number.isFinite(biome.moistureMax) ? biome.moistureMax : 1;
     const e0 = Number.isFinite(biome.elevationMin) ? biome.elevationMin : 0, e1 = Number.isFinite(biome.elevationMax) ? biome.elevationMax : 1;
-    return rangeScore(tempC, t0, t1, 4) + rangeScore(moisture, m0, m1, .08) * .7 + rangeScore(landElevation, e0, e1, .12) * .85;
+    let score = envelopeScore(tempC, t0, t1, 4) + envelopeScore(moisture, m0, m1, .08) * .7 + envelopeScore(landElevation, e0, e1, .1) * .85;
+    const isRock = /rock|cliff|stone/i.test(biome.name);
+    if (isRock) {
+      score += slope > 1.3 ? -1.8 : 3.0;
+    } else if (slope > 1.6) {
+      score += 1.0;
+    }
+    return score;
   }
   function moistureColor(value) {
     const stops = [[154, 112, 70], [202, 178, 112], [132, 165, 101], [75, 147, 137], [48, 100, 153]], v = clamp(value) * (stops.length - 1), lo = Math.floor(v), hi = Math.min(stops.length - 1, lo + 1), t = v - lo;
@@ -511,7 +739,14 @@
       else if (mode === 'biomes') color = pal[biomeIdx] || [90, 120, 90];
       else if (mode === 'texture') {
         if (elevation < sea && waterLayer) color = elevation < sea * .65 ? [37, 76, 93] : [55, 111, 123];
-        else color = pal[biomeIdx] || [120, 137, 79];
+        else {
+          color = pal[biomeIdx] || [120, 137, 79];
+          const slopeMag = Math.hypot(nx, ny);
+          if (slopeMag > 1.45) {
+            const rockBlend = clamp((slopeMag - 1.45) / 0.85);
+            color = color.map((c, ch) => Math.round(lerp(c, [118, 114, 110][ch], rockBlend * 0.72)));
+          }
+        }
         const grain = (hash(sx, sy, 9) - .5) * 12; color = color.map(c => clamp((c + grain) * shade, 0, 255));
       } else if (mode === 'relief' && elevation >= sea) {
         color = (pal[biomeIdx] || [120, 137, 79]).map(c => clamp(c * clamp(.56 + hillshade * .72, .52, 1.28), 0, 255));
@@ -537,6 +772,9 @@
     if (!state.height || !state.wet || !state.temp || !state.biomeMap) return;
     const x = Math.round(clamp(nx) * (SIZE - 1)), y = Math.round(clamp(ny) * (SIZE - 1)), index = y * SIZE + x;
     const sea = readSettings().sea, height = state.height[index], tempC = state.temp[index] * 55 - 20 + state.climateOffset, moisture = state.wet[index], elevation = height < sea ? -clamp((sea - height) / Math.max(sea, .01)) : clamp((height - sea) / Math.max(.01, 1 - sea));
+    const hL = state.height[y * SIZE + Math.max(0, x - 1)], hR = state.height[y * SIZE + Math.min(SIZE - 1, x + 1)];
+    const hT = state.height[Math.max(0, y - 1) * SIZE + x], hB = state.height[Math.min(SIZE - 1, y + 1) * SIZE + x];
+    const slope = Math.hypot((hR - hL) * 35, (hB - hT) * 35);
     const biomeIndex = state.biomeMap[index] || 0, biome = state.biomes[biomeIndex];
     const swatch = $('#sampleBiome').querySelector('.sample-swatch'); swatch.style.background = biome?.color || '#777';
     $('#sampleBiome').lastElementChild.textContent = biome?.name || 'Unassigned';
@@ -546,13 +784,13 @@
     $('#sampleHint').textContent = `X ${Math.round(nx * 100)}% · Y ${Math.round(ny * 100)}%`;
     let reason;
     if (height < sea) {
-      const waterCandidates = state.biomes.map((candidate, i) => ({ candidate, i, score: scoreBiomeProfile(candidate, tempC, moisture, elevation) })).filter(item => item.candidate.enabled && isWaterBiome(item.candidate)).sort((a, b) => a.score - b.score);
+      const waterCandidates = state.biomes.map((candidate, i) => ({ candidate, i, score: scoreBiomeProfile(candidate, tempC, moisture, elevation, slope) })).filter(item => item.candidate.enabled && isWaterBiome(item.candidate)).sort((a, b) => a.score - b.score);
       const selected = waterCandidates.find(item => item.i === biomeIndex), rank = waterCandidates.findIndex(item => item.i === biomeIndex);
       reason = waterCandidates.length ? `Water biome chosen by temperature, moisture, and sea-relative depth. Fit score ${selected?.score.toFixed(2) ?? '—'}${rank > 0 ? `; ${rank + 1} of ${waterCandidates.length} water profiles` : ''}.` : 'No enabled water profile; below-sea points use the first enabled biome.';
     }
     else if (state.distribution === 'balanced') reason = 'Balanced mode ranks land by temperature, moisture, and elevation, then assigns even shares across the enabled land biomes. This point’s biome follows that quota, not just its closest climate profile.';
     else {
-      const candidates = state.biomes.map((candidate, i) => ({ candidate, i, score: scoreBiomeProfile(candidate, tempC, moisture, elevation) })).filter(item => item.candidate.enabled && !isWaterBiome(item.candidate)).sort((a, b) => a.score - b.score);
+      const candidates = state.biomes.map((candidate, i) => ({ candidate, i, score: scoreBiomeProfile(candidate, tempC, moisture, elevation, slope) })).filter(item => item.candidate.enabled && !isWaterBiome(item.candidate)).sort((a, b) => a.score - b.score);
       const selected = candidates.find(item => item.i === biomeIndex), rank = candidates.findIndex(item => item.i === biomeIndex), next = candidates.find(item => item.i !== biomeIndex);
       reason = selected ? `Natural mode picked the closest enabled land profile. Fit score ${selected.score.toFixed(2)}${next ? `; next closest ${next.candidate.name} (${next.score.toFixed(2)})` : ''}. Lower scores mean a closer match across temperature, moisture, and relative elevation.` : 'This point uses the closest enabled land-biome profile.';
       if (rank > 0 && selected) reason += ` ${rank + 1} of ${candidates.length} by profile fit.`;
@@ -829,10 +1067,21 @@
     const files = [], pixelBiomes = new Uint8Array(width * height), present = new Set();
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) { const index = y * width + x, biomeIndex = sampleBiome(x, y); pixelBiomes[index] = biomeIndex; present.add(biomeIndex); }
     for (const biomeIndex of present) {
-      const biome = state.biomes[biomeIndex], mask = new Uint8Array(width * height);
-      for (let i = 0; i < pixelBiomes.length; i++) if (pixelBiomes[i] === biomeIndex) mask[i] = 255;
+      const biome = state.biomes[biomeIndex], rawMask = new Uint8Array(width * height);
+      for (let i = 0; i < pixelBiomes.length; i++) if (pixelBiomes[i] === biomeIndex) rawMask[i] = 255;
+      // Soft weightmap: 3x3 box blur on mask boundary to eliminate harsh stair-stepping
+      // for seamless Unreal Landscape Layer Blend transitions
+      const mask = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        let sum = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const ny = clamp(y + dy, 0, height - 1), nx = clamp(x + dx, 0, width - 1);
+          sum += rawMask[ny * width + nx];
+        }
+        mask[y * width + x] = Math.round(sum / 9);
+      }
       const name = `${base}-mask-biome-${assetSlug(biome.name)}-${width}x${height}.png`;
-      files.push({ blob: await png8Gray(width, height, mask), name, manifest: { file: name, kind: 'biome-weight-mask', biome: biome.name, color: biome.color, bitDepth: 8, channels: 'grayscale; 0=outside, 255=inside', width, height } });
+      files.push({ blob: await png8Gray(width, height, mask), name, manifest: { file: name, kind: 'biome-weight-mask', biome: biome.name, color: biome.color, bitDepth: 8, channels: 'grayscale; 0=outside, 255=inside; feathered layer blend', width, height } });
     }
     return files;
   }
