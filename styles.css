@@ -52,6 +52,8 @@
 @media(max-width:480px){.biome-preset-list{grid-template-columns:1fr}}
 @media(max-width:480px){.unreal-import-options{grid-template-columns:1fr}.unreal-import-options section+section{border-left:0;border-top:1px solid #303b32;padding:9px 0 0}}
 .export-dialog{max-height:calc(100dvh - 24px);overflow-y:auto}
+.map-stage.orbit-view{cursor:grab;touch-action:none}
+.map-stage.orbit-view:active{cursor:grabbing}
 .draw-history{display:flex;gap:5px;margin:10px 0}
 .draw-history button{flex:1;border:1px solid #39473b;border-radius:4px;background:#202a22;color:#aab9aa;padding:5px 3px;font-size:9px}
 .draw-history button:disabled{opacity:.4;cursor:default}

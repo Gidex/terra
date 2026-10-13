@@ -23,7 +23,7 @@
   const BIOME_PRESETS = [...DEFAULT_BIOMES, ...WATER_BIOME_PRESETS];
   const STARTER_BIOME_NAMES = ['Temperate forest', 'Grassland', 'Desert', 'Alpine', 'Ocean'];
   function createSeed() { const value = globalThis.crypto?.getRandomValues ? globalThis.crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 4294967296); return `TERRA-${value.toString(16).toUpperCase().padStart(8, '0')}`; }
-  const state = { size: 2017, seed: createSeed(), terrain: 'island', view: 'height', biomes: structuredClone(BIOME_PRESETS.filter(b => STARTER_BIOME_NAMES.includes(b.name))), distribution: 'natural', climateOffset: 0, temperatureUnit: 'C', features: { rivers: 0, lakes: 0, roads: 0, cities: 0, villages: 0, peaks: 0 }, drawn: [], drawType: 'river', brush: 3, grid: true, zoom: 1, height: null, wet: null, temp: null, biomeMap: null, hoverPoint: null, elevation: null, time: 0, mapName: 'Untitled landscape' };
+  const state = { size: 2017, seed: createSeed(), terrain: 'island', view: 'height', view3DYaw: -.72, orbitDrag: null, biomes: structuredClone(BIOME_PRESETS.filter(b => STARTER_BIOME_NAMES.includes(b.name))), distribution: 'natural', climateOffset: 0, temperatureUnit: 'C', features: { rivers: 0, lakes: 0, roads: 0, cities: 0, villages: 0, peaks: 0 }, drawn: [], drawType: 'river', brush: 3, grid: true, zoom: 1, height: null, wet: null, temp: null, biomeMap: null, hoverPoint: null, elevation: null, time: 0, mapName: 'Untitled landscape' };
   const canvas = $('#mapCanvas'), ctx = canvas.getContext('2d', { alpha: false });
   const overlay = $('#overlayCanvas'), octx = overlay.getContext('2d');
   const prof = $('#profileCanvas'), pctx = prof.getContext('2d');
@@ -43,15 +43,15 @@
     const centers = Array.from({ length: 5 }, () => ({ x: .2 + rng() * .6, y: .2 + rng() * .6, r: .08 + rng() * .17, h: .35 + rng() * .65 }));
     const a = { x: .1 + rng() * .15, y: .1 + rng() * .8 }, b = { x: .75 + rng() * .2, y: .1 + rng() * .8 };
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-      const nx = x / (size - 1), ny = y / (size - 1), r = Math.hypot(nx - .5, ny - .5) * 1.414, n = fractal(nx * (4 + rough * 5), ny * (4 + rough * 5), seed), detail = (n - .49) * (.08 + rough * .25); let base = .36, mask = 1;
+      const nx = x / (size - 1), ny = y / (size - 1), r = Math.hypot(nx - .5, ny - .5) * 1.414, n = fractal(nx * (4 + rough * 5), ny * (4 + rough * 5), seed), detail = (n - .49) * rough * .25; let base = .36, mask = 1;
       switch (terrain) {
-        case 'island': case 'archipelago': { let land = Math.max(0, 1 - smooth(.38 / islandSize, .98 / islandSize, r)); if (terrain === 'archipelago') { land = 0; for (const c of centers) land = Math.max(land, c.h * (1 - smooth(c.r * islandSize * .55, c.r * islandSize * 1.55, Math.hypot(nx - c.x, ny - c.y)))); } base = .02 + land * (.52 + .27 * n) + detail; break; }
+        case 'island': case 'archipelago': { let land = Math.max(0, 1 - smooth(.38 / islandSize, .98 / islandSize, r)); if (terrain === 'archipelago') { land = 0; for (const c of centers) land = Math.max(land, c.h * (1 - smooth(c.r * islandSize * .55, c.r * islandSize * 1.55, Math.hypot(nx - c.x, ny - c.y)))); } base = .02 + land * (.52 + .27 * rough * n) + detail; break; }
         case 'canyon': { const d = distToPath(nx, ny, [a, { x: .42, y: .45 }, { x: .67, y: .55 }, b]); base = .24 + smooth(canyonWidth, canyonWidth * 3.2, d) * .62 + detail * 1.2 - .22 * (1 - smooth(canyonWidth * .6, canyonWidth * 1.5, d)); break; }
         case 'highland': base = .3 + smooth(.24, .7, r) * (.2 + ridgeStrength * .55) + .32 - .16 * (1 - smooth(.04, .36, r)) + detail; break;
         case 'volcanic': base = .31 + .42 * smooth(.27, .62, r) - .25 * Math.exp(-Math.pow(r / .28, 2)) + detail; break;
         case 'coastal': base = (.1 + smooth(.08, .9, nx) * .32 + smooth(.2, .75, ny) * .16 + detail) * (mask = smooth(.02, .2, nx)); break;
         case 'plateau': base = .32 + .31 * smooth(.08, .35, n) + .04 * (n - .5) + detail * .55 - .18 * smooth(.65, 1, r); break;
-        case 'valley': { const d = Math.abs(ny - (.49 + .09 * Math.sin(nx * 5.4) + .035 * Math.sin(nx * 14))); base = .6 + detail + .2 * n - .33 * (1 - smooth(.025, .21, d)); break; }
+        case 'valley': { const d = Math.abs(ny - (.49 + .09 * Math.sin(nx * 5.4) + .035 * Math.sin(nx * 14))); base = .6 + detail + .2 * rough * n - .33 * (1 - smooth(.025, .21, d)); break; }
         case 'mesa': { let m = 0; for (const c of centers) m = Math.max(m, c.h * (1 - smooth(c.r * .78, c.r * 1.08, Math.hypot(nx - c.x, ny - c.y)))); base = .13 + m * .68 + detail * .7; break; }
         case 'dunes': { const ridge = Math.abs(Math.sin(nx * 35 + ny * 8 + fractal(nx * 2, ny * 2, seed) * 5)); base = .34 + (1 - ridge) * .25 + Math.sin(nx * 8 + ny * 12) * .025 + detail * .3; break; }
         case 'fjord': { const inlet = Math.abs(nx - (.49 + .08 * Math.sin(ny * 5.4) + .025 * Math.sin(ny * 14))); base = .2 + smooth(.012, .115, inlet) * .68 + detail * 1.1; break; }
@@ -73,7 +73,7 @@
   }
   function fractal(x, y, seed) { let sum = 0, amp = .52, freq = 1, norm = 0; for (let i = 0; i < 5; i++) { sum += noise(x * freq, y * freq, seed + i * 311) * amp; norm += amp; amp *= .52; freq *= 2.03; } return sum / norm; }
   function readSettings() {
-    return { peak: +$('#elevation').value, rough: +$('#roughness').value / 100, erosion: +$('#erosion').value / 100, sea: +$('#seaLevel').value / 100, flatten: $('#flattenSettlements').checked, auto: $('#autoFeatures').checked, islandSize: +$('#islandSize').value / 100, canyonWidth: +$('#canyonWidth').value / 100, ridgeStrength: +$('#ridgeStrength').value / 100, quality: +$('#quality').value, climateOffsetC: state.climateOffset, temperatureUnit: state.temperatureUnit };
+    return { peak: +$('#elevation').value, shapeHeight: +$('#shapeHeight').value / 100, rough: +$('#roughness').value / 100, erosion: +$('#erosion').value / 100, sea: +$('#seaLevel').value / 100, flatten: $('#flattenSettlements').checked, auto: $('#autoFeatures').checked, islandSize: +$('#islandSize').value / 100, canyonWidth: +$('#canyonWidth').value / 100, ridgeStrength: +$('#ridgeStrength').value / 100, quality: +$('#quality').value, climateOffsetC: state.climateOffset, temperatureUnit: state.temperatureUnit };
   }
   const drawHistory = { undo: [], redo: [] };
   function saveDrawHistory() { drawHistory.undo.push(structuredClone(state.drawn)); if (drawHistory.undo.length > 40) drawHistory.undo.shift(); drawHistory.redo.length = 0; syncDrawHistory(); }
@@ -313,6 +313,7 @@
       try { heights = terrainWorker && !workerUnavailable ? await workerTerrain(terrainParams) : generateTerrainFallback(terrainParams); }
       catch (error) { console.warn('Terrain worker failed; retrying locally.', error); try { heights = generateTerrainFallback(terrainParams); workerUnavailable = true; } catch (fallbackError) { if (request === generationToken) { $('#loading').style.display = 'none'; $('#statusText').textContent = 'GENERATION FAILED'; showToast(fallbackError.message || 'Terrain generation failed'); } return; } }
       if (request !== generationToken) return;
+      if (cfg.shapeHeight !== 1) for (let i = 0; i < heights.length; i++) heights[i] = clamp(cfg.sea + (heights[i] - cfg.sea) * cfg.shapeHeight);
       SIZE = generationSize;
       const moisture = new Float32Array(SIZE * SIZE), temp = new Float32Array(SIZE * SIZE);
       const sampleBase = (x, y) => heights[Math.round(clamp(y) * (SIZE - 1)) * SIZE + Math.round(clamp(x) * (SIZE - 1))];
@@ -448,8 +449,50 @@
     if (elevation < sea) return .02 + .09 * clamp(elevation / sea);
     return .13 + .87 * clamp((elevation - sea) / Math.max(.0001, 1 - sea));
   }
+  function render3D() {
+    const w = canvas.width, h = canvas.height, sea = readSettings().sea, n = 104;
+    ctx.fillStyle = '#121814'; ctx.fillRect(0, 0, w, h);
+    const yaw = state.view3DYaw, cs = Math.cos(yaw), sn = Math.sin(yaw), horizontal = w * .48, depth = h * .24;
+    const worldKm = ({ 505: 1, 1009: 2, 2017: 4, 4033: 8 })[state.size] || 4;
+    const vertical = horizontal * (state.elevation || readSettings().peak) / (worldKm * 1000 * Math.max(.2, 1 - sea));
+    const sample = (x, y) => {
+      const ix = Math.round(clamp(x) * (SIZE - 1)), iy = Math.round(clamp(y) * (SIZE - 1)), i = iy * SIZE + ix;
+      return { height: state.height[i], biome: state.biomeMap[i] || 0 };
+    };
+    const project = (x, y, height) => {
+      const dx = x - .5, dy = y - .5, rx = dx * cs - dy * sn, ry = dx * sn + dy * cs;
+      return { x: w * .5 + rx * horizontal, y: h * .46 + ry * depth - (height - sea) * vertical };
+    };
+    const palette = state.biomes.map(b => hexRgb(b.color));
+    // Sort by projected camera depth; diagonal map order breaks when the user orbits.
+    const cells = [];
+    for (let y = 0; y < n - 1; y++) for (let x = 0; x < n - 1; x++) cells.push({ x, y, depth: ((x + .5) / (n - 1) - .5) * sn + ((y + .5) / (n - 1) - .5) * cs });
+    cells.sort((a, b) => a.depth - b.depth);
+    for (const cell of cells) {
+        const { x, y } = cell, u = x / (n - 1), v = y / (n - 1), du = 1 / (n - 1);
+        const a = sample(u, v), b = sample(u + du, v), c = sample(u + du, v + du), d = sample(u, v + du);
+        const points = [project(u, v, a.height), project(u + du, v, b.height), project(u + du, v + du, c.height), project(u, v + du, d.height)];
+        const avg = (a.height + b.height + c.height + d.height) * .25, biome = avg < sea ? null : palette[Math.round(a.biome)];
+        const shade = clamp(.86 + ((a.height + b.height) - (c.height + d.height)) * 1.25 + ((a.height + d.height) - (b.height + c.height)) * .52, .56, 1.18);
+        const color = (biome || [48, 103, 119]).map(channel => Math.round(channel * shade));
+        ctx.fillStyle = `rgb(${color[0]} ${color[1]} ${color[2]})`; ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y); for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y); ctx.closePath(); ctx.fill();
+    }
+    if ($('[data-layer="features"]').checked && state.featuresGenerated) {
+      for (const feature of state.featuresGenerated) {
+        if (!feature.pts || feature.pts.length < 2 || !['river', 'road'].includes(feature.type)) continue;
+        ctx.beginPath(); feature.pts.forEach((point, i) => { const p = project(point.x, point.y, sample(point.x, point.y).height + .006); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = feature.type === 'river' ? '#89cfe0' : '#e0c292'; ctx.lineWidth = feature.type === 'river' ? 3.5 : 3; ctx.stroke();
+      }
+      for (const area of state.areasGenerated || []) if (!area.hidden && ['city', 'village'].includes(area.type)) {
+        const p = project(area.x, area.y, sample(area.x, area.y).height + .01); ctx.fillStyle = area.type === 'city' ? '#f1c786' : '#c9d993'; ctx.strokeStyle = '#18231a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, area.type === 'city' ? 5 : 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+    }
+  }
   function render() {
     if (!state.height) return;
+    if (state.view === '3d') {
+      render3D(); $('#captionTitle').textContent = '3D TERRAIN · DRAG TO ORBIT'; $('#climateLegend').hidden = true; renderDistribution(); return;
+    }
     const mode = state.view, w = canvas.width, h = canvas.height, image = ctx.createImageData(w, h), data = image.data;
     const pal = state.biomes.map(b => hexRgb(b.color)), sea = readSettings().sea, waterLayer = $('[data-layer="water"]').checked, contoursOn = $('[data-layer="contours"]').checked;
     const sun = [-.52, -.34, .78];
@@ -545,7 +588,7 @@
   }
   function drawOverlays() {
     octx.clearRect(0, 0, overlay.width, overlay.height);
-    if (!state.featuresGenerated || state.view === 'profile') return;
+    if (!state.featuresGenerated || state.view === 'profile' || state.view === '3d') return;
     if (state.grid) {
       octx.strokeStyle = '#d4e4d22c'; octx.lineWidth = 1; octx.setLineDash([3, 5]);
       for (let i = 1; i < 4; i++) { const p = overlay.width * i / 4; octx.beginPath(); octx.moveTo(p, 0); octx.lineTo(p, overlay.height); octx.stroke(); octx.beginPath(); octx.moveTo(0, p); octx.lineTo(overlay.width, p); octx.stroke(); }
@@ -667,7 +710,7 @@
     list.onclick = e => { const rm = e.target.dataset.remove; if (rm !== undefined && state.biomes.length > 1) { state.biomes.splice(+rm, 1); buildBiomeControls(); if (state.height) { assignBiomes(readSettings().sea); render(); } } };
   }
   function syncSliders() {
-    const v = { elevation: [`${(+$('#elevation').value).toLocaleString()} m`, 500, 4500], roughness: [`${$('#roughness').value}%`, 5, 100], erosion: [`${$('#erosion').value}%`, 0, 100], seaLevel: [`${$('#seaLevel').value}%`, 0, 65], islandSize: [`${$('#islandSize').value}%`, 65, 145], canyonWidth: [`${$('#canyonWidth').value}%`, 5, 20], ridgeStrength: [`${$('#ridgeStrength').value}%`, 0, 100] };
+    const v = { shapeHeight: [`${$('#shapeHeight').value}%`, 20, 160], elevation: [`${(+$('#elevation').value).toLocaleString()} m`, 500, 4500], roughness: [`${$('#roughness').value}%`, 0, 100], erosion: [`${$('#erosion').value}%`, 0, 100], seaLevel: [`${$('#seaLevel').value}%`, 0, 65], islandSize: [`${$('#islandSize').value}%`, 65, 145], canyonWidth: [`${$('#canyonWidth').value}%`, 5, 20], ridgeStrength: [`${$('#ridgeStrength').value}%`, 0, 100] };
     for (const [id, [label, min, max]] of Object.entries(v)) { $(`#${id}Value`).textContent = label; const el = $(`#${id}`); el.style.setProperty('--fill', `${(+el.value - min) / (max - min) * 100}%`); }
     $('#sizeValue').textContent = `${state.size} × ${state.size}`;
   }
@@ -840,12 +883,16 @@
       $('#drawPanel').classList.remove('open'); $('#drawBtn').classList.remove('active'); $('#mapStage').classList.remove('draw-enabled');
     }
     state.view = view;
+    $('#mapStage').classList.toggle('orbit-view', view === '3d');
     $$('.view-tab').forEach(button => button.classList.toggle('active', button.dataset.view === view));
     render(); drawOverlays();
-    $('#captionTitle').textContent = ({ height: 'HEIGHT FIELD · SEA LEVEL IN GRAYSCALE', relief: 'ELEVATION + HILLSHADE', biomes: 'BIOME DISTRIBUTION', climate: 'AIR TEMPERATURE', moisture: 'MOISTURE FIELD', texture: 'TERRAIN PREVIEW', profile: 'EAST—WEST CROSS SECTION' })[view];
+    $('#captionTitle').textContent = ({ height: 'HEIGHT FIELD · SEA LEVEL IN GRAYSCALE', relief: 'ELEVATION + HILLSHADE', biomes: 'BIOME DISTRIBUTION', climate: 'AIR TEMPERATURE', moisture: 'MOISTURE FIELD', texture: 'TERRAIN PREVIEW', '3d': '3D TERRAIN · DRAG TO ORBIT', profile: 'EAST—WEST CROSS SECTION' })[view];
   }
   $$('.view-tab').forEach(button => button.addEventListener('click', () => selectView(button.dataset.view)));
+  $('#mapStage').addEventListener('pointerdown', e => { if (state.view === '3d' && e.button === 0) { state.orbitDrag = { x: e.clientX }; $('#mapStage').setPointerCapture(e.pointerId); } });
+  $('#mapStage').addEventListener('pointerup', e => { state.orbitDrag = null; if ($('#mapStage').hasPointerCapture(e.pointerId)) $('#mapStage').releasePointerCapture(e.pointerId); });
   $('#mapStage').addEventListener('pointermove', e => {
+    if (state.view === '3d') { if (state.orbitDrag) { state.view3DYaw += (e.clientX - state.orbitDrag.x) * .01; state.orbitDrag.x = e.clientX; render(); } $('#sampleHud').hidden = true; return; }
     const rect = $('#mapStage').getBoundingClientRect();
     state.hoverPoint = { x: clamp((e.clientX - rect.left) / rect.width), y: clamp((e.clientY - rect.top) / rect.height) };
     updateBiomeInspector(state.hoverPoint.x, state.hoverPoint.y);
@@ -860,7 +907,7 @@
   $('#terrainType').addEventListener('change', e => { state.terrain = e.target.value; syncShapeControls(); generate(); });
   $('#mapSize').addEventListener('change', e => { state.size = +e.target.value; syncSliders(); generate(); });
   $('#quality').addEventListener('change', () => generate());
-  ['elevation', 'roughness', 'erosion', 'seaLevel', 'islandSize', 'canyonWidth', 'ridgeStrength'].forEach(id => $(`#${id}`).addEventListener('input', () => { syncSliders(); scheduleGenerate(); }));
+  ['shapeHeight', 'elevation', 'roughness', 'erosion', 'seaLevel', 'islandSize', 'canyonWidth', 'ridgeStrength'].forEach(id => $(`#${id}`).addEventListener('input', () => { syncSliders(); scheduleGenerate(); }));
   $('#climateTemp').addEventListener('input', e => {
     const shown = +e.target.value; state.climateOffset = state.temperatureUnit === 'C' ? shown : shown * 5 / 9;
     syncClimateControl(); if (state.height) { assignBiomes(readSettings().sea); render(); }
@@ -968,7 +1015,7 @@
       const settings = cfg.settings || {};
       if (Number.isFinite(+settings.climateOffsetC)) state.climateOffset = clamp(+settings.climateOffsetC, -15, 15);
       if (settings.temperatureUnit === 'C' || settings.temperatureUnit === 'F') state.temperatureUnit = settings.temperatureUnit;
-      for (const [key, id, scale, min, max] of [['peak','elevation',1,500,4500],['rough','roughness',100,5,100],['erosion','erosion',100,0,100],['sea','seaLevel',100,0,65],['islandSize','islandSize',100,65,145],['canyonWidth','canyonWidth',100,5,20],['ridgeStrength','ridgeStrength',100,0,100]]) if (Number.isFinite(+settings[key])) $(`#${id}`).value = clamp(Math.round(+settings[key] * scale), min, max);
+      for (const [key, id, scale, min, max] of [['shapeHeight','shapeHeight',100,20,160],['peak','elevation',1,500,4500],['rough','roughness',100,0,100],['erosion','erosion',100,0,100],['sea','seaLevel',100,0,65],['islandSize','islandSize',100,65,145],['canyonWidth','canyonWidth',100,5,20],['ridgeStrength','ridgeStrength',100,0,100]]) if (Number.isFinite(+settings[key])) $(`#${id}`).value = clamp(Math.round(+settings[key] * scale), min, max);
       if ([384, 512, 768].includes(+settings.quality)) $('#quality').value = String(settings.quality);
       if (Array.isArray(cfg.biomes) && cfg.biomes.length) {
         const importedBiomes = normalizeBiomeList(cfg.biomes), waterOnlyList = biomeListOnly && importedBiomes.every(isWaterBiome);
