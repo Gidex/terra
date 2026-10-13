@@ -72,7 +72,7 @@
         </section>
 
         <section class="section-block biome-section">
-          <div class="section-heading"><span class="eyebrow">Biomes</span><span class="count-pill" id="biomeCount">11 active</span></div>
+          <div class="section-heading"><span class="eyebrow">Biomes</span><div class="biome-heading-actions"><button class="text-button" id="collapseBiomes" type="button" aria-expanded="false">Expand all</button><span class="count-pill" id="biomeCount">11 active</span></div></div>
           <div class="field-row climate-heading"><label class="field-label" for="climateTemp">World temperature shift</label><span><output class="field-value" id="climateTempValue">0 °C</output> <button class="unit-toggle" id="temperatureUnit" type="button" aria-label="Switch temperature units">°C</button></span></div>
           <input id="climateTemp" class="climate-slider" type="range" min="-15" max="15" value="0" step="1" />
           <small class="seed-hint">Shifts the climate used to place biomes.</small>

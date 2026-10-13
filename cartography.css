@@ -104,8 +104,16 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline-color:
 .biome-percent { color: #717b70; }
 .biome-enabled { accent-color: #486b49; }
 .biome-profile summary { color: #68766a; }
+.profile-range-group { border-color: #d7d2c7; background: #f7f5ee; }
+.profile-range-heading { color: #63715f; }
 .biome-profile-grid label { color: #657064; }
-.biome-profile-grid input { border-color: #d1ccbf; background: #fbf9f3; color: #344238; }
+.biome-profile-grid output { color: #344238; }
+.biome-range-pair:before { background: linear-gradient(to right,#c9d0c3 0%,#c9d0c3 var(--range-start),#638665 var(--range-start),#638665 var(--range-end),#c9d0c3 var(--range-end),#c9d0c3 100%); }
+.biome-range-pair input[type=range]::-webkit-slider-thumb { border-color: #f7f5ee; background: #638665; box-shadow: 0 0 0 1px #638665; }
+.biome-range-pair input[type=range]::-moz-range-thumb { border-color: #f7f5ee; background: #638665; box-shadow: 0 0 0 1px #638665; }
+.biome-range-pair input[type=range]:focus-visible::-webkit-slider-thumb,.biome-range-pair input[type=range]:active::-webkit-slider-thumb { box-shadow: 0 0 0 3px #63866544,0 0 0 1px #638665; }
+.biome-range-pair input[type=range]:focus-visible::-moz-range-thumb,.biome-range-pair input[type=range]:active::-moz-range-thumb { box-shadow: 0 0 0 3px #63866544,0 0 0 1px #638665; }
+.range-endpoints { color: #737e72; }
 .add-biome { border-color: #aeb9a8; color: #47694b; }
 .add-biome:hover { border-color: #6d8c67; background: #e9ede3; }
 .biome-options { color: #657064; }

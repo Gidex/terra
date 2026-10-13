@@ -484,11 +484,12 @@
     const w = prof.width, h = prof.height; pctx.clearRect(0, 0, w, h); pctx.fillStyle = '#19211b'; pctx.fillRect(0, 0, w, h);
     pctx.strokeStyle = '#344136'; pctx.lineWidth = 1;
     for (let j = 1; j <= 3; j++) { const y = j * h / 4; pctx.beginPath(); pctx.moveTo(0, y); pctx.lineTo(w, y); pctx.stroke(); }
-    const sea = readSettings().sea, mappedSea = heightmapValue(sea, sea); pctx.fillStyle = '#365966'; pctx.fillRect(0, h - mappedSea * (h - 8) - 4, w, mappedSea * (h - 8));
+    const sea = readSettings().sea, plotHeight = h - 12, seaY = h - sea * plotHeight - 4; pctx.fillStyle = '#365966'; pctx.fillRect(0, seaY, w, h - seaY - 4);
     pctx.beginPath();
-    for (let x = 0; x < w; x++) { const mapx = Math.floor(x / w * SIZE), value = state.height[Math.floor(SIZE / 2) * SIZE + mapx], yVal = heightmapValue(value, sea), y = h - yVal * (h - 8) - 4; x ? pctx.lineTo(x, y) : pctx.moveTo(x, y); }
+    for (let x = 0; x < w; x++) { const mapx = Math.floor(x / w * SIZE), value = state.height[Math.floor(SIZE / 2) * SIZE + mapx], y = h - value * plotHeight - 4; x ? pctx.lineTo(x, y) : pctx.moveTo(x, y); }
     pctx.lineTo(w, h); pctx.lineTo(0, h); pctx.closePath(); pctx.fillStyle = '#68866166'; pctx.fill(); pctx.strokeStyle = '#accb91'; pctx.lineWidth = 1.5; pctx.beginPath();
-    for (let x = 0; x < w; x++) { const mapx = Math.floor(x / w * SIZE), value = state.height[Math.floor(SIZE / 2) * SIZE + mapx], yVal = heightmapValue(value, sea), y = h - yVal * (h - 8) - 4; x ? pctx.lineTo(x, y) : pctx.moveTo(x, y); } pctx.stroke();
+    for (let x = 0; x < w; x++) { const mapx = Math.floor(x / w * SIZE), value = state.height[Math.floor(SIZE / 2) * SIZE + mapx], y = h - value * plotHeight - 4; x ? pctx.lineTo(x, y) : pctx.moveTo(x, y); } pctx.stroke();
+    pctx.save(); pctx.setLineDash([4, 4]); pctx.strokeStyle = '#8eb8c1'; pctx.beginPath(); pctx.moveTo(0, seaY); pctx.lineTo(w, seaY); pctx.stroke(); pctx.restore();
     $('#profileMax').textContent = `${state.elevation.toLocaleString()} m`;
   }
   function drawProfileLarge() {
@@ -496,12 +497,12 @@
     d.fill(0); for (let i = 0; i < w * h; i++) { d[i * 4 + 3] = 255; }
     const sea = readSettings().sea, center = Math.floor(SIZE / 2);
     for (let x = 0; x < w; x++) {
-      const raw = state.height[center * SIZE + Math.floor(x / w * SIZE)], v = heightmapValue(raw, sea), yline = Math.floor((1 - v) * (h - 48) + 20);
+      const raw = state.height[center * SIZE + Math.floor(x / w * SIZE)], v = clamp(raw), yline = Math.floor((1 - v) * (h - 48) + 20);
       for (let y = yline; y < h - 25; y++) { const p = (y * w + x) * 4; d[p] = 94 + Math.min(40, Math.round(v * 40)); d[p + 1] = 128 + Math.min(45, Math.round(v * 45)); d[p + 2] = 86; }
       const p = (yline * w + x) * 4; d[p] = 192; d[p + 1] = 220; d[p + 2] = 166;
     }
-    const mappedSea = heightmapValue(sea, sea), waterY = Math.floor((1 - mappedSea) * (h - 48) + 20); for (let y = waterY; y < h - 25; y++) for (let x = 0; x < w; x++) { const v = state.height[center * SIZE + Math.floor(x / w * SIZE)]; if (v < sea) { const p = (y * w + x) * 4; d[p] = 47; d[p + 1] = 104; d[p + 2] = 122; } }
-    ctx.putImageData(img, 0, 0); ctx.strokeStyle = '#6c8b71'; ctx.beginPath(); ctx.moveTo(0, h - 24); ctx.lineTo(w, h - 24); ctx.stroke();
+    const waterY = Math.floor((1 - sea) * (h - 48) + 20); for (let y = waterY; y < h - 25; y++) for (let x = 0; x < w; x++) { const v = state.height[center * SIZE + Math.floor(x / w * SIZE)]; if (v < sea) { const p = (y * w + x) * 4; d[p] = 47; d[p + 1] = 104; d[p + 2] = 122; } }
+    ctx.putImageData(img, 0, 0); ctx.save(); ctx.strokeStyle = '#6c8b71'; ctx.beginPath(); ctx.moveTo(0, h - 24); ctx.lineTo(w, h - 24); ctx.stroke(); ctx.setLineDash([7, 5]); ctx.strokeStyle = '#a9ced4'; ctx.beginPath(); ctx.moveTo(0, waterY); ctx.lineTo(w, waterY); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#d4e3df'; ctx.font = '10px sans-serif'; ctx.fillText('SEA LEVEL', 12, Math.max(14, waterY - 6)); ctx.restore();
   }
   function drawOverlays() {
     octx.clearRect(0, 0, overlay.width, overlay.height);
@@ -553,34 +554,76 @@
     state.biomes.forEach((b, i) => { const pct = counts[i] / total * 100; const badge = $(`#biomePct${i}`); if (badge) badge.textContent = `${Math.round(pct)}%`; if (!b.enabled) return; const row = document.createElement('div'); row.className = 'distribution-row'; row.innerHTML = `<span class="distribution-swatch" style="background:${b.color}"></span><span>${b.name}</span><span class="distribution-percent">${Math.round(pct)}%</span>`; list.appendChild(row); });
   }
   function displayTemperature(celsius) { return state.temperatureUnit === 'C' ? celsius : celsius * 9 / 5 + 32; }
+  function refreshBiomeProfile(index) {
+    const biome = state.biomes[index], profile = $$('.biome-profile')[index];
+    if (!biome || !profile) return;
+    const shown = {
+      tempMin: Math.round(displayTemperature(biome.tempMin)), tempMax: Math.round(displayTemperature(biome.tempMax)),
+      moistureMin: Math.round(biome.moistureMin * 100), moistureMax: Math.round(biome.moistureMax * 100),
+      elevationMin: Math.round(biome.elevationMin * 100), elevationMax: Math.round(biome.elevationMax * 100)
+    };
+    for (const [field, value] of Object.entries(shown)) profile.querySelector(`[data-profile="${field}"]`).value = value;
+    for (const [group, minField, maxField, lower, upper] of [
+      ['temperature', 'tempMin', 'tempMax', state.temperatureUnit === 'C' ? -80 : -112, state.temperatureUnit === 'C' ? 55 : 131],
+      ['moisture', 'moistureMin', 'moistureMax', 0, 100], ['elevation', 'elevationMin', 'elevationMax', 0, 100]
+    ]) {
+      const pair = profile.querySelector(`[data-range-pair="${group}"]`), minInput = pair.querySelector(`[data-profile="${minField}"]`), maxInput = pair.querySelector(`[data-profile="${maxField}"]`);
+      minInput.value = shown[minField]; maxInput.value = shown[maxField];
+      minInput.min = maxInput.min = lower; minInput.max = maxInput.max = upper;
+      const range = Math.max(1, upper - lower);
+      pair.style.setProperty('--range-start', `${(shown[minField] - lower) / range * 100}%`);
+      pair.style.setProperty('--range-end', `${(shown[maxField] - lower) / range * 100}%`);
+      const suffix = group === 'temperature' ? `°${state.temperatureUnit}` : '%';
+      pair.closest('.profile-range-group').querySelector('.profile-range-heading output').textContent = `${shown[minField]}${suffix} – ${shown[maxField]}${suffix}`;
+    }
+    profile.querySelector('summary').textContent = `${shown.tempMin}°–${shown.tempMax}°${state.temperatureUnit} · ${shown.moistureMin}–${shown.moistureMax}% moisture`;
+  }
+  function setBiomeProfileValue(field, index, value) {
+    const biome = state.biomes[index];
+    if (!biome || !Number.isFinite(value)) return false;
+    biome[field] = field.startsWith('temp') ? (state.temperatureUnit === 'C' ? value : (value - 32) * 5 / 9) : value / 100;
+    if (field === 'tempMin' && biome.tempMin > biome.tempMax) biome.tempMax = biome.tempMin;
+    if (field === 'tempMax' && biome.tempMax < biome.tempMin) biome.tempMin = biome.tempMax;
+    if (field === 'moistureMin' && biome.moistureMin > biome.moistureMax) biome.moistureMax = biome.moistureMin;
+    if (field === 'moistureMax' && biome.moistureMax < biome.moistureMin) biome.moistureMin = biome.moistureMax;
+    if (field === 'elevationMin' && biome.elevationMin > biome.elevationMax) biome.elevationMax = biome.elevationMin;
+    if (field === 'elevationMax' && biome.elevationMax < biome.elevationMin) biome.elevationMin = biome.elevationMax;
+    return true;
+  }
+  function syncBiomeCollapseButton() {
+    const profiles = $$('.biome-profile'), allOpen = profiles.length > 0 && profiles.every(profile => profile.open), button = $('#collapseBiomes');
+    button.textContent = allOpen ? 'Collapse all' : 'Expand all'; button.setAttribute('aria-expanded', String(allOpen));
+  }
   function buildBiomeControls() {
-    const list = $('#biomeList'); list.replaceChildren();
+    const list = $('#biomeList'), openProfiles = new Set([...list.querySelectorAll('.biome-profile')].flatMap((profile, index) => profile.open ? [index] : []));
+    list.replaceChildren();
     const activeCount = state.biomes.filter(b => b.enabled).length;
     state.biomes.forEach((b, i) => {
       const entry = document.createElement('div'), row = document.createElement('div'); entry.className = 'biome-entry'; row.className = 'biome-row';
       row.innerHTML = `<input type="color" aria-label="${b.name} biome color" value="${b.color}" data-color="${i}"><span class="biome-name">${b.name}</span><span class="biome-percent" id="biomePct${i}">—</span><input class="biome-enabled" type="checkbox" aria-label="Enable ${b.name}" title="${b.enabled && activeCount === 1 ? 'At least one biome must stay enabled' : ''}" ${b.enabled ? 'checked' : ''} ${b.enabled && activeCount === 1 ? 'disabled' : ''} data-enabled="${i}">${state.biomes.length > 1 ? `<button class="remove-biome" title="Remove ${b.name}" data-remove="${i}">×</button>` : '<span></span>'}`;
       const t0 = Math.round(displayTemperature(Number.isFinite(b.tempMin) ? b.tempMin : -20)), t1 = Math.round(displayTemperature(Number.isFinite(b.tempMax) ? b.tempMax : 35));
-      const profile = document.createElement('details'); profile.className = 'biome-profile';
-      profile.innerHTML = `<summary>${t0}°–${t1}°${state.temperatureUnit} · ${Math.round((b.moistureMin ?? 0) * 100)}–${Math.round((b.moistureMax ?? 1) * 100)}% moisture</summary><div class="biome-profile-grid"><label>Temp min<input type="number" step="1" data-profile="tempMin" data-index="${i}" value="${t0}"></label><label>Temp max<input type="number" step="1" data-profile="tempMax" data-index="${i}" value="${t1}"></label><label>Moisture min %<input type="number" min="0" max="100" step="1" data-profile="moistureMin" data-index="${i}" value="${Math.round((b.moistureMin ?? 0) * 100)}"></label><label>Moisture max %<input type="number" min="0" max="100" step="1" data-profile="moistureMax" data-index="${i}" value="${Math.round((b.moistureMax ?? 1) * 100)}"></label><label>Elevation min %<input type="number" min="0" max="100" step="1" data-profile="elevationMin" data-index="${i}" value="${Math.round((b.elevationMin ?? 0) * 100)}"></label><label>Elevation max %<input type="number" min="0" max="100" step="1" data-profile="elevationMax" data-index="${i}" value="${Math.round((b.elevationMax ?? 1) * 100)}"></label></div>`;
+      const tempMin = state.temperatureUnit === 'C' ? -80 : -112, tempMax = state.temperatureUnit === 'C' ? 55 : 131;
+      const profile = document.createElement('details'); profile.className = 'biome-profile'; profile.open = openProfiles.has(i);
+      profile.innerHTML = `<summary>${t0}°–${t1}°${state.temperatureUnit} · ${Math.round((b.moistureMin ?? 0) * 100)}–${Math.round((b.moistureMax ?? 1) * 100)}% moisture</summary><div class="biome-profile-grid"><div class="profile-range-group"><div class="profile-range-heading"><span>Temperature</span><output>${t0}°–${t1}°${state.temperatureUnit}</output></div><div class="biome-range-pair" data-range-pair="temperature"><input type="range" class="range-min" aria-label="${b.name} minimum temperature" min="${tempMin}" max="${tempMax}" step="1" data-profile="tempMin" data-index="${i}" value="${t0}"><input type="range" class="range-max" aria-label="${b.name} maximum temperature" min="${tempMin}" max="${tempMax}" step="1" data-profile="tempMax" data-index="${i}" value="${t1}"></div><div class="range-endpoints"><span>${tempMin}°${state.temperatureUnit}</span><span>${tempMax}°${state.temperatureUnit}</span></div></div><div class="profile-range-group"><div class="profile-range-heading"><span>Moisture</span><output>${Math.round((b.moistureMin ?? 0) * 100)}–${Math.round((b.moistureMax ?? 1) * 100)}%</output></div><div class="biome-range-pair" data-range-pair="moisture"><input type="range" class="range-min" aria-label="${b.name} minimum moisture" min="0" max="100" step="1" data-profile="moistureMin" data-index="${i}" value="${Math.round((b.moistureMin ?? 0) * 100)}"><input type="range" class="range-max" aria-label="${b.name} maximum moisture" min="0" max="100" step="1" data-profile="moistureMax" data-index="${i}" value="${Math.round((b.moistureMax ?? 1) * 100)}"></div><div class="range-endpoints"><span>0%</span><span>100%</span></div></div><div class="profile-range-group"><div class="profile-range-heading"><span>Elevation</span><output>${Math.round((b.elevationMin ?? 0) * 100)}–${Math.round((b.elevationMax ?? 1) * 100)}%</output></div><div class="biome-range-pair" data-range-pair="elevation"><input type="range" class="range-min" aria-label="${b.name} minimum elevation" min="0" max="100" step="1" data-profile="elevationMin" data-index="${i}" value="${Math.round((b.elevationMin ?? 0) * 100)}"><input type="range" class="range-max" aria-label="${b.name} maximum elevation" min="0" max="100" step="1" data-profile="elevationMax" data-index="${i}" value="${Math.round((b.elevationMax ?? 1) * 100)}"></div><div class="range-endpoints"><span>0%</span><span>100%</span></div></div></div>`;
+      profile.addEventListener('toggle', syncBiomeCollapseButton);
       entry.append(row, profile); list.appendChild(entry);
+      refreshBiomeProfile(i);
     });
     $('#biomeCount').textContent = `${activeCount} active`;
     $('#addBiome').disabled = state.biomes.length >= 32;
-    list.oninput = e => { const c = e.target.dataset.color; if (c !== undefined) { state.biomes[+c].color = e.target.value; if (state.height) { assignBiomes(readSettings().sea); render(); } } };
+    syncBiomeCollapseButton();
+    let biomeRenderTimer;
+    list.oninput = e => {
+      const colorIndex = e.target.dataset.color;
+      if (colorIndex !== undefined) { state.biomes[+colorIndex].color = e.target.value; if (state.height) { assignBiomes(readSettings().sea); render(); } return; }
+      const field = e.target.dataset.profile, index = +e.target.dataset.index;
+      if (!field || !Number.isFinite(index) || !setBiomeProfileValue(field, index, +e.target.value)) return;
+      refreshBiomeProfile(index);
+      clearTimeout(biomeRenderTimer); biomeRenderTimer = setTimeout(() => { if (state.height) { assignBiomes(readSettings().sea); render(); } }, 90);
+    };
     list.onchange = e => {
       const en = e.target.dataset.enabled;
       if (en !== undefined) { state.biomes[+en].enabled = e.target.checked; buildBiomeControls(); if (state.height) { assignBiomes(readSettings().sea); render(); } return; }
-      const field = e.target.dataset.profile, index = +e.target.dataset.index;
-      if (!field || !Number.isFinite(index) || !Number.isFinite(+e.target.value)) return;
-      const value = +e.target.value, biome = state.biomes[index];
-      biome[field] = field.startsWith('temp') ? (state.temperatureUnit === 'C' ? value : (value - 32) * 5 / 9) : value / 100;
-      if (field === 'tempMin' && biome.tempMin > biome.tempMax) biome.tempMax = biome.tempMin;
-      if (field === 'tempMax' && biome.tempMax < biome.tempMin) biome.tempMin = biome.tempMax;
-      if (field === 'moistureMin' && biome.moistureMin > biome.moistureMax) biome.moistureMax = biome.moistureMin;
-      if (field === 'moistureMax' && biome.moistureMax < biome.moistureMin) biome.moistureMin = biome.moistureMax;
-      if (field === 'elevationMin' && biome.elevationMin > biome.elevationMax) biome.elevationMax = biome.elevationMin;
-      if (field === 'elevationMax' && biome.elevationMax < biome.elevationMin) biome.elevationMin = biome.elevationMax;
-      buildBiomeControls(); if (state.height) { assignBiomes(readSettings().sea); render(); }
     };
     list.onclick = e => { const rm = e.target.dataset.remove; if (rm !== undefined && state.biomes.length > 1) { state.biomes.splice(+rm, 1); buildBiomeControls(); if (state.height) { assignBiomes(readSettings().sea); render(); } } };
   }
@@ -787,6 +830,7 @@
     syncClimateControl(); if (state.height) { assignBiomes(readSettings().sea); render(); }
   });
   $('#temperatureUnit').addEventListener('click', () => { state.temperatureUnit = state.temperatureUnit === 'C' ? 'F' : 'C'; syncClimateControl(); syncClimateLegend(); buildBiomeControls(); if (state.hoverPoint) updateBiomeInspector(state.hoverPoint.x, state.hoverPoint.y); });
+  $('#collapseBiomes').addEventListener('click', () => { const expand = !$$('.biome-profile').every(profile => profile.open); $$('.biome-profile').forEach(profile => { profile.open = expand; }); syncBiomeCollapseButton(); });
   function setControlsOpen(open) {
     $('#sidebar').classList.toggle('open', open);
     $('#sidebarScrim').hidden = !open;
