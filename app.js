@@ -314,6 +314,8 @@
       catch (error) { console.warn('Terrain worker failed; retrying locally.', error); try { heights = generateTerrainFallback(terrainParams); workerUnavailable = true; } catch (fallbackError) { if (request === generationToken) { $('#loading').style.display = 'none'; $('#statusText').textContent = 'GENERATION FAILED'; showToast(fallbackError.message || 'Terrain generation failed'); } return; } }
       if (request !== generationToken) return;
       if (cfg.shapeHeight !== 1) for (let i = 0; i < heights.length; i++) heights[i] = clamp(cfg.sea + (heights[i] - cfg.sea) * cfg.shapeHeight);
+      // Assign SIZE only after the token check so a stale async branch
+      // never overwrites the value used by a newer, still-running generation.
       SIZE = generationSize;
       const moisture = new Float32Array(SIZE * SIZE), temp = new Float32Array(SIZE * SIZE);
       const sampleBase = (x, y) => heights[Math.round(clamp(y) * (SIZE - 1)) * SIZE + Math.round(clamp(x) * (SIZE - 1))];
@@ -442,7 +444,9 @@
     $('#climateRamp').setAttribute('aria-label', isMoisture ? 'Moisture color scale from dry to wet' : 'Temperature color scale from cold to hot');
     $('#climateMin').textContent = isMoisture ? '0%' : `${Math.round(displayTemperature(-20 + state.climateOffset))}°${unit}`;
     $('#climateMax').textContent = isMoisture ? '100%' : `${Math.round(displayTemperature(35 + state.climateOffset))}°${unit}`;
-    $('#climateEndLabels').innerHTML = isMoisture ? '<span>Dry</span><span>Wet</span>' : '<span>Cold</span><span>Hot</span>';
+    const [dryWetEl, hotColdEl] = [$('#climateEndLabels').children[0], $('#climateEndLabels').children[1]];
+    dryWetEl.textContent = isMoisture ? 'Dry' : 'Cold';
+    hotColdEl.textContent = isMoisture ? 'Wet' : 'Hot';
   }
   function heightmapValue(elevation, sea) {
     if (sea <= 0) return elevation;
@@ -494,7 +498,7 @@
       render3D(); $('#captionTitle').textContent = '3D TERRAIN · DRAG TO ORBIT'; $('#climateLegend').hidden = true; renderDistribution(); return;
     }
     const mode = state.view, w = canvas.width, h = canvas.height, image = ctx.createImageData(w, h), data = image.data;
-    const pal = state.biomes.map(b => hexRgb(b.color)), sea = readSettings().sea, waterLayer = $('[data-layer="water"]').checked, contoursOn = $('[data-layer="contours"]').checked;
+    const pal = state.biomes.map(b => hexRgb(b.color)), cfg = readSettings(), sea = cfg.sea, waterLayer = $('[data-layer="water"]').checked, contoursOn = $('[data-layer="contours"]').checked;
     const sun = [-.52, -.34, .78];
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const sx = Math.floor(x / w * SIZE), sy = Math.floor(y / h * SIZE), idx = sy * SIZE + sx, elevation = state.height[idx], biomeIdx = state.biomeMap[idx] || 0;
@@ -632,8 +636,21 @@
   function renderDistribution() {
     if (!state.biomeMap) return;
     const counts = new Array(state.biomes.length).fill(0); for (const id of state.biomeMap) counts[id]++;
-    const total = state.biomeMap.length; const list = $('#distributionList'); list.innerHTML = '';
-    state.biomes.forEach((b, i) => { const pct = counts[i] / total * 100; const badge = $(`#biomePct${i}`); if (badge) badge.textContent = `${Math.round(pct)}%`; if (!b.enabled) return; const row = document.createElement('div'); row.className = 'distribution-row'; row.innerHTML = `<span class="distribution-swatch" style="background:${b.color}"></span><span>${b.name}</span><span class="distribution-percent">${Math.round(pct)}%</span>`; list.appendChild(row); });
+    const total = state.biomeMap.length;
+    const list = $('#distributionList');
+    const fragment = document.createDocumentFragment();
+    state.biomes.forEach((b, i) => {
+      const pct = counts[i] / total * 100;
+      const badge = $(`#biomePct${i}`); if (badge) badge.textContent = `${Math.round(pct)}%`;
+      if (!b.enabled) return;
+      const row = document.createElement('div'); row.className = 'distribution-row';
+      const swatch = document.createElement('span'); swatch.className = 'distribution-swatch'; swatch.style.background = b.color;
+      const name = document.createElement('span'); name.textContent = b.name;
+      const pctEl = document.createElement('span'); pctEl.className = 'distribution-percent'; pctEl.textContent = `${Math.round(pct)}%`;
+      row.append(swatch, name, pctEl);
+      fragment.appendChild(row);
+    });
+    list.replaceChildren(fragment);
   }
   function displayTemperature(celsius) { return state.temperatureUnit === 'C' ? celsius : celsius * 9 / 5 + 32; }
   function refreshBiomeProfile(index) {
@@ -727,8 +744,17 @@
   async function copySeed() {
     const value = normalizeSeed();
     if (value !== state.seed) generate();
-    try { await navigator.clipboard.writeText(value); showToast('Seed copied'); }
-    catch { const input = $('#seed'); input.focus(); input.select(); document.execCommand('copy'); input.setSelectionRange(input.value.length, input.value.length); showToast('Seed copied'); }
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast('Seed copied');
+    } catch {
+      // clipboard API unavailable (non-HTTPS or denied) — select the text so
+      // the user can copy manually. execCommand('copy') is removed in FF 127+.
+      const input = $('#seed');
+      input.focus();
+      input.select();
+      showToast('Press Ctrl+C to copy the selected seed');
+    }
   }
   function showToast(text) { const t = $('#toast'); t.textContent = text; t.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => t.classList.remove('show'), 2400); }
   function pointerPos(e) { const r = overlay.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) }; }
@@ -758,7 +784,7 @@
   function drawCurrent() { drawOverlays(); if (!currentStroke || !['relief', 'texture'].includes(state.view)) return; const f = currentStroke; octx.beginPath(); f.pts.forEach((p, i) => i ? octx.lineTo(p.x * overlay.width, p.y * overlay.height) : octx.moveTo(p.x * overlay.width, p.y * overlay.height)); if (f.pts.length === 1) { const p = f.pts[0]; octx.arc(p.x * overlay.width, p.y * overlay.height, f.radius * overlay.width, 0, Math.PI * 2); octx.fillStyle = '#b5d5a480'; octx.fill(); } else { octx.strokeStyle = f.type === 'river' ? '#74bcd4' : '#d4b788'; octx.lineWidth = Math.max(3, f.width * overlay.width); octx.lineCap = 'round'; octx.stroke(); } }
 
   async function compress(data) { const cs = new CompressionStream('deflate'); const writer = cs.writable.getWriter(); writer.write(data); writer.close(); return new Uint8Array(await new Response(cs.readable).arrayBuffer()); }
-  function crc32(buf) { let c = -1; for (const byte of buf) { c ^= byte; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0); } return (c ^ -1) >>> 0; }
+  function crc32(buf) { let c = -1; for (let i = 0; i < buf.length; i++) { c ^= buf[i]; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0); } return (c ^ -1) >>> 0; }
   function be32(v) { return [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]; }
   function chunk(type, bytes) { const name = new TextEncoder().encode(type), crcInput = new Uint8Array(name.length + bytes.length); crcInput.set(name); crcInput.set(bytes, name.length); return new Uint8Array([...be32(bytes.length), ...name, ...bytes, ...be32(crc32(crcInput))]); }
   async function png16(width, height, pixels) {
@@ -843,7 +869,9 @@
     return new Blob([...chunks, ...central, end], { type: 'application/zip' });
   }
   function sampleHeight(x, y) { const fx = x / (state.size - 1) * (SIZE - 1), fy = y / (state.size - 1) * (SIZE - 1), x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(SIZE - 1, x0 + 1), y1 = Math.min(SIZE - 1, y0 + 1), tx = fx - x0, ty = fy - y0; return lerp(lerp(state.height[y0 * SIZE + x0], state.height[y0 * SIZE + x1], tx), lerp(state.height[y1 * SIZE + x0], state.height[y1 * SIZE + x1], tx), ty); }
-  function sampleBiome(x, y) { const ix = Math.floor(x / (state.size - 1) * (SIZE - 1)), iy = Math.floor(y / (state.size - 1) * (SIZE - 1)); return state.biomeMap[iy * SIZE + ix] || 0; }
+  // Use the same coordinate mapping as sampleHeight so biome and height maps
+  // stay pixel-aligned at any export resolution.
+  function sampleBiome(x, y) { const ix = Math.round(x / (state.size - 1) * (SIZE - 1)), iy = Math.round(y / (state.size - 1) * (SIZE - 1)); return state.biomeMap[Math.min(SIZE - 1, iy) * SIZE + Math.min(SIZE - 1, ix)] || 0; }
   function updateUnrealImportHint() {
     const w = state.size, quads = w - 1, sectionQuads = 63, sectionsPerComponent = 4, componentQuads = sectionQuads * 2;
     const components = quads / componentQuads, worldKm = ({ 505: 1, 1009: 2, 2017: 4, 4033: 8 })[w] || 4;
@@ -1033,8 +1061,8 @@
   $('#exportBtn').addEventListener('click', () => { updateUnrealImportHint(); $('#exportDialog').showModal(); }); $('#linearHeight').addEventListener('change', updateUnrealImportHint); $('#confirmExport').addEventListener('click', e => { e.preventDefault(); exportFiles(); }); $('#biomeExportBtn').addEventListener('click', csvExport);
   $('#layersToggle').addEventListener('click', e => { const hidden = e.currentTarget.dataset.hidden !== 'true'; e.currentTarget.dataset.hidden = hidden ? 'true' : 'false'; e.currentTarget.textContent = hidden ? '›' : '⌄'; $('#layerList').style.display = hidden ? 'none' : 'flex'; });
   $$('.layer-row input').forEach(c => c.addEventListener('change', () => { if (c.dataset.layer === 'features') drawOverlays(); if (c.dataset.layer === 'water' || c.dataset.layer === 'contours') render(); }));
-  $('#mapStage').addEventListener('dblclick', () => { state.zoom = state.zoom === 1 ? 1.25 : 1; $('#mapStage').style.transform = `scale(${state.zoom})`; $('#zoomLevel').textContent = `${Math.round(state.zoom * 100)}%`; });
-  document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); restoreDrawHistory(e.shiftKey ? drawHistory.redo : drawHistory.undo, e.shiftKey ? drawHistory.undo : drawHistory.redo); } if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate(); if (e.key === 'Escape' && $('#exportDialog').open) $('#exportDialog').close(); if (e.key === 'Escape' && $('#sidebar').classList.contains('open')) setControlsOpen(false); });
+  $('#mapStage').addEventListener('dblclick', () => { state.zoom = Math.abs(state.zoom - 1) < 0.05 ? 1.25 : 1; $('#mapStage').style.transform = `scale(${state.zoom})`; $('#zoomLevel').textContent = `${Math.round(state.zoom * 100)}%`; });
+  document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); restoreDrawHistory(e.shiftKey ? drawHistory.redo : drawHistory.undo, e.shiftKey ? drawHistory.undo : drawHistory.redo); } if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate(); if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); updateUnrealImportHint(); $('#exportDialog').showModal(); } if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); $('#saveBtn').click(); } if (e.key === 'Escape' && $('#exportDialog').open) $('#exportDialog').close(); if (e.key === 'Escape' && $('#sidebar').classList.contains('open')) setControlsOpen(false); });
   $('#seed').value = state.seed;
   buildBiomeControls(); syncSliders(); syncClimateControl(); syncDrawHistory(); generate();
 })();

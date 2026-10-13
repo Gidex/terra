@@ -143,7 +143,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline-color:
 .checkmark { flex: 0 0 14px; width: 14px; height: 14px; border-color: #aeb6a8; border-radius: 3px; background: #fbf9f3; }
 .check-row input:checked + .checkmark { border-color: #52724e; background: #52724e; }
 .check-row:focus-within .checkmark { outline: 2px solid #8c6b3e; outline-offset: 2px; }
-.sidebar-footer { border-color: #d9d4c8; color: #737c70; padding: 0 19px; }
+.sidebar-footer { border-color: #d9d4c8; color: #737c70; padding: 10px 19px; }
 .keyboard-hint { font: 9px var(--mono); }
 .keyboard-hint span { font: 10px var(--font); }
 .version { color: #7d8379; }
