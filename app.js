@@ -13,10 +13,17 @@
     { name: 'Wetlands', color: '#508b83', tempMin: 2, tempMax: 32, moistureMin: .78, moistureMax: 1, elevationMin: 0, elevationMax: .72, enabled: true },
     { name: 'Mediterranean', color: '#9c9b5c', tempMin: 10, tempMax: 34, moistureMin: .28, moistureMax: .7, elevationMin: 0, elevationMax: .82, enabled: true },
     { name: 'Alpine', color: '#d0d4cd', tempMin: -25, tempMax: 12, moistureMin: 0, moistureMax: 1, elevationMin: .58, elevationMax: 1, enabled: true },
-    { name: 'Ocean', color: '#315a67', tempMin: -30, tempMax: 45, moistureMin: 0, moistureMax: 1, elevationMin: 0, elevationMax: 1, enabled: true }
+    { name: 'Ocean', color: '#315a67', tempMin: -30, tempMax: 45, moistureMin: 0, moistureMax: 1, elevationMin: -1, elevationMax: 0, enabled: true }
   ];
+  const WATER_BIOME_PRESETS = [
+    { name: 'Coastal Waters', color: '#58b8c9', tempMin: -2, tempMax: 35, moistureMin: 0, moistureMax: 1, elevationMin: -.08, elevationMax: 0, enabled: true },
+    { name: 'Shallow Ocean', color: '#287fa8', tempMin: -2, tempMax: 32, moistureMin: 0, moistureMax: 1, elevationMin: -.35, elevationMax: -.08, enabled: true },
+    { name: 'Deep Ocean', color: '#12345e', tempMin: -2, tempMax: 25, moistureMin: 0, moistureMax: 1, elevationMin: -1, elevationMax: -.35, enabled: true }
+  ];
+  const BIOME_PRESETS = [...DEFAULT_BIOMES, ...WATER_BIOME_PRESETS];
+  const STARTER_BIOME_NAMES = ['Temperate forest', 'Grassland', 'Desert', 'Alpine', 'Ocean'];
   function createSeed() { const value = globalThis.crypto?.getRandomValues ? globalThis.crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 4294967296); return `TERRA-${value.toString(16).toUpperCase().padStart(8, '0')}`; }
-  const state = { size: 2017, seed: createSeed(), terrain: 'island', view: 'height', biomes: structuredClone(DEFAULT_BIOMES), distribution: 'natural', climateOffset: 0, temperatureUnit: 'C', features: { rivers: 0, lakes: 0, roads: 0, cities: 0, villages: 0, peaks: 0 }, drawn: [], drawType: 'river', brush: 3, grid: true, zoom: 1, height: null, wet: null, temp: null, biomeMap: null, hoverPoint: null, elevation: null, time: 0, mapName: 'Untitled landscape' };
+  const state = { size: 2017, seed: createSeed(), terrain: 'island', view: 'height', biomes: structuredClone(BIOME_PRESETS.filter(b => STARTER_BIOME_NAMES.includes(b.name))), distribution: 'natural', climateOffset: 0, temperatureUnit: 'C', features: { rivers: 0, lakes: 0, roads: 0, cities: 0, villages: 0, peaks: 0 }, drawn: [], drawType: 'river', brush: 3, grid: true, zoom: 1, height: null, wet: null, temp: null, biomeMap: null, hoverPoint: null, elevation: null, time: 0, mapName: 'Untitled landscape' };
   const canvas = $('#mapCanvas'), ctx = canvas.getContext('2d', { alpha: false });
   const overlay = $('#overlayCanvas'), octx = overlay.getContext('2d');
   const prof = $('#profileCanvas'), pctx = prof.getContext('2d');
@@ -353,14 +360,25 @@
     });
   }
   function assignBiomes(sea) {
-    const enabled = state.biomes.filter(b => b.enabled), oceanBiome = enabled.find(b => b.name === 'Ocean'), landBiomes = enabled.filter(b => b.name !== 'Ocean');
+    const enabled = state.biomes.filter(b => b.enabled), waterBiomes = enabled.filter(isWaterBiome), landBiomes = enabled.filter(b => !isWaterBiome(b));
     state.biomeMap = new Uint8Array(SIZE * SIZE);
     if (!enabled.length) { state.biomeMap.fill(0); return; }
-    const waterIndex = state.biomes.indexOf(oceanBiome || enabled[0]);
+    const waterFallback = waterBiomes[0] || enabled[0], landCandidates = landBiomes.length ? landBiomes : enabled;
+    const relativeElevation = h => h < sea ? -clamp((sea - h) / Math.max(sea, .01)) : clamp((h - sea) / Math.max(1 - sea, .01));
+    const bestMatch = (candidates, i) => {
+      const tempC = state.temp[i] * 55 - 20 + state.climateOffset, moisture = state.wet[i], elevation = relativeElevation(state.height[i]);
+      let bestIndex = state.biomes.indexOf(candidates[0]), bestScore = Infinity;
+      for (const biome of candidates) {
+        const score = scoreBiomeProfile(biome, tempC, moisture, elevation);
+        if (score < bestScore) { bestScore = score; bestIndex = state.biomes.indexOf(biome); }
+      }
+      return Math.max(0, bestIndex);
+    };
+    const assignWater = i => { state.biomeMap[i] = waterBiomes.length ? bestMatch(waterBiomes, i) : Math.max(0, state.biomes.indexOf(waterFallback)); };
     if (state.distribution === 'balanced') {
       const land = [];
       for (let i = 0; i < state.biomeMap.length; i++) {
-        if (state.height[i] < sea) state.biomeMap[i] = Math.max(0, waterIndex);
+        if (state.height[i] < sea) assignWater(i);
         else land.push(i);
       }
       if (landBiomes.length) {
@@ -372,15 +390,32 @@
     }
     for (let i = 0; i < state.biomeMap.length; i++) {
       const h = state.height[i];
-      if (h < sea) { state.biomeMap[i] = Math.max(0, waterIndex); continue; }
-      const candidates = landBiomes.length ? landBiomes : enabled, tempC = state.temp[i] * 55 - 20 + state.climateOffset, moisture = state.wet[i], landElevation = clamp((h - sea) / Math.max(.01, 1 - sea));
-      let bestIndex = state.biomes.indexOf(candidates[0]), bestScore = Infinity;
-      for (const biome of candidates) {
-        const score = scoreBiomeProfile(biome, tempC, moisture, landElevation);
-        if (score < bestScore) { bestScore = score; bestIndex = state.biomes.indexOf(biome); }
-      }
-      state.biomeMap[i] = Math.max(0, bestIndex);
+      if (h < sea) assignWater(i);
+      else state.biomeMap[i] = bestMatch(landCandidates, i);
     }
+  }
+  function isWaterBiome(biome) {
+    if (String(biome.name).trim().toLowerCase() === 'ocean') return true;
+    const min = Number.isFinite(biome.elevationMin) ? biome.elevationMin : 0, max = Number.isFinite(biome.elevationMax) ? biome.elevationMax : 1;
+    return min < 0 && max <= 0;
+  }
+  function normalizeBiomeList(list) {
+    if (!Array.isArray(list) || !list.length) throw new Error('Biome JSON must be a non-empty array.');
+    return list.slice(0, 32).map(item => {
+      const biome = item && typeof item === 'object' ? item : {}, template = BIOME_PRESETS.find(preset => preset.name === biome.name) || {};
+      const finite = (key, fallback) => Number.isFinite(+biome[key]) ? +biome[key] : (Number.isFinite(+template[key]) ? +template[key] : fallback);
+      const tempA = clamp(finite('tempMin', -20), -80, 55), tempB = clamp(finite('tempMax', 35), -80, 55);
+      const moistureA = clamp(finite('moistureMin', 0), 0, 1), moistureB = clamp(finite('moistureMax', 1), 0, 1);
+      const elevationA = clamp(finite('elevationMin', 0), -1, 1), elevationB = clamp(finite('elevationMax', 1), -1, 1);
+      return { name: String(biome.name || 'Biome').replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 30) || 'Biome', color: /^#[0-9a-f]{6}$/i.test(biome.color) ? biome.color : '#777777', tempMin: Math.min(tempA, tempB), tempMax: Math.max(tempA, tempB), moistureMin: Math.min(moistureA, moistureB), moistureMax: Math.max(moistureA, moistureB), elevationMin: Math.min(elevationA, elevationB), elevationMax: Math.max(elevationA, elevationB), enabled: biome.enabled !== false };
+    });
+  }
+  function applyBiomeList(list, preserveLandForWaterOnly = true) {
+    const imported = normalizeBiomeList(list), waterOnly = imported.every(isWaterBiome);
+    state.biomes = preserveLandForWaterOnly && waterOnly ? [...state.biomes.filter(biome => !isWaterBiome(biome)), ...imported].slice(0, 32) : imported;
+    if (!state.biomes.length) throw new Error('At least one biome must remain enabled.');
+    buildBiomeControls();
+    if (state.height) { assignBiomes(readSettings().sea); render(); drawOverlays(); }
   }
   const hexRgb = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
   function rangeScore(value, min, max, minimumHalfRange) { const center = (min + max) * .5, half = Math.max(minimumHalfRange, (max - min) * .5); return Math.pow((value - center) / half, 2); }
@@ -454,19 +489,23 @@
   function updateBiomeInspector(nx, ny) {
     if (!state.height || !state.wet || !state.temp || !state.biomeMap) return;
     const x = Math.round(clamp(nx) * (SIZE - 1)), y = Math.round(clamp(ny) * (SIZE - 1)), index = y * SIZE + x;
-    const sea = readSettings().sea, height = state.height[index], tempC = state.temp[index] * 55 - 20 + state.climateOffset, moisture = state.wet[index], elevation = clamp((height - sea) / Math.max(.01, 1 - sea));
+    const sea = readSettings().sea, height = state.height[index], tempC = state.temp[index] * 55 - 20 + state.climateOffset, moisture = state.wet[index], elevation = height < sea ? -clamp((sea - height) / Math.max(sea, .01)) : clamp((height - sea) / Math.max(.01, 1 - sea));
     const biomeIndex = state.biomeMap[index] || 0, biome = state.biomes[biomeIndex];
     const swatch = $('#sampleBiome').querySelector('.sample-swatch'); swatch.style.background = biome?.color || '#777';
     $('#sampleBiome').lastElementChild.textContent = biome?.name || 'Unassigned';
     $('#sampleTemperature').textContent = `${Math.round(displayTemperature(tempC))}°${state.temperatureUnit}`;
     $('#sampleMoisture').textContent = `${Math.round(moisture * 100)}%`;
-    $('#sampleElevation').textContent = height < sea ? 'Below sea level' : `${Math.round(elevation * 100)}% above sea`;
+    $('#sampleElevation').textContent = `${elevation > 0 ? '+' : ''}${Math.round(elevation * 100)}% ${elevation < 0 ? 'below sea' : 'above sea'}`;
     $('#sampleHint').textContent = `X ${Math.round(nx * 100)}% · Y ${Math.round(ny * 100)}%`;
     let reason;
-    if (height < sea) reason = state.biomes.some(b => b.enabled && b.name === 'Ocean') ? 'Ocean is assigned to every point below the sea-level threshold, regardless of its climate profile.' : 'Ocean is disabled, so below-sea points use the first enabled biome.';
+    if (height < sea) {
+      const waterCandidates = state.biomes.map((candidate, i) => ({ candidate, i, score: scoreBiomeProfile(candidate, tempC, moisture, elevation) })).filter(item => item.candidate.enabled && isWaterBiome(item.candidate)).sort((a, b) => a.score - b.score);
+      const selected = waterCandidates.find(item => item.i === biomeIndex), rank = waterCandidates.findIndex(item => item.i === biomeIndex);
+      reason = waterCandidates.length ? `Water biome chosen by temperature, moisture, and sea-relative depth. Fit score ${selected?.score.toFixed(2) ?? '—'}${rank > 0 ? `; ${rank + 1} of ${waterCandidates.length} water profiles` : ''}.` : 'No enabled water profile; below-sea points use the first enabled biome.';
+    }
     else if (state.distribution === 'balanced') reason = 'Balanced mode ranks land by temperature, moisture, and elevation, then assigns even shares across the enabled land biomes. This point’s biome follows that quota, not just its closest climate profile.';
     else {
-      const candidates = state.biomes.map((candidate, i) => ({ candidate, i, score: scoreBiomeProfile(candidate, tempC, moisture, elevation) })).filter(item => item.candidate.enabled && item.candidate.name !== 'Ocean').sort((a, b) => a.score - b.score);
+      const candidates = state.biomes.map((candidate, i) => ({ candidate, i, score: scoreBiomeProfile(candidate, tempC, moisture, elevation) })).filter(item => item.candidate.enabled && !isWaterBiome(item.candidate)).sort((a, b) => a.score - b.score);
       const selected = candidates.find(item => item.i === biomeIndex), rank = candidates.findIndex(item => item.i === biomeIndex), next = candidates.find(item => item.i !== biomeIndex);
       reason = selected ? `Natural mode picked the closest enabled land profile. Fit score ${selected.score.toFixed(2)}${next ? `; next closest ${next.candidate.name} (${next.score.toFixed(2)})` : ''}. Lower scores mean a closer match across temperature, moisture, and relative elevation.` : 'This point uses the closest enabled land-biome profile.';
       if (rank > 0 && selected) reason += ` ${rank + 1} of ${candidates.length} by profile fit.`;
@@ -476,7 +515,7 @@
     $('#sampleHudPosition').textContent = `X ${Math.round(nx * 100)}% · Y ${Math.round(ny * 100)}%`;
     $('#sampleHudTemperature').textContent = `${Math.round(displayTemperature(tempC))}°${state.temperatureUnit}`;
     $('#sampleHudMoisture').textContent = `${Math.round(moisture * 100)}% moisture`;
-    $('#sampleHudElevation').textContent = height < sea ? 'Below sea' : `${Math.round(elevation * 100)}% above sea`;
+    $('#sampleHudElevation').textContent = `${elevation > 0 ? '+' : ''}${Math.round(elevation * 100)}% ${elevation < 0 ? 'below sea' : 'above sea'}`;
     $('#sampleHudReason').textContent = reason;
     $('#sampleHud').hidden = false;
   }
@@ -565,7 +604,7 @@
     for (const [field, value] of Object.entries(shown)) profile.querySelector(`[data-profile="${field}"]`).value = value;
     for (const [group, minField, maxField, lower, upper] of [
       ['temperature', 'tempMin', 'tempMax', state.temperatureUnit === 'C' ? -80 : -112, state.temperatureUnit === 'C' ? 55 : 131],
-      ['moisture', 'moistureMin', 'moistureMax', 0, 100], ['elevation', 'elevationMin', 'elevationMax', 0, 100]
+      ['moisture', 'moistureMin', 'moistureMax', 0, 100], ['elevation', 'elevationMin', 'elevationMax', -100, 100]
     ]) {
       const pair = profile.querySelector(`[data-range-pair="${group}"]`), minInput = pair.querySelector(`[data-profile="${minField}"]`), maxInput = pair.querySelector(`[data-profile="${maxField}"]`);
       minInput.value = shown[minField]; maxInput.value = shown[maxField];
@@ -604,7 +643,7 @@
       const t0 = Math.round(displayTemperature(Number.isFinite(b.tempMin) ? b.tempMin : -20)), t1 = Math.round(displayTemperature(Number.isFinite(b.tempMax) ? b.tempMax : 35));
       const tempMin = state.temperatureUnit === 'C' ? -80 : -112, tempMax = state.temperatureUnit === 'C' ? 55 : 131;
       const profile = document.createElement('details'); profile.className = 'biome-profile'; profile.open = openProfiles.has(i);
-      profile.innerHTML = `<summary>${t0}°–${t1}°${state.temperatureUnit} · ${Math.round((b.moistureMin ?? 0) * 100)}–${Math.round((b.moistureMax ?? 1) * 100)}% moisture</summary><div class="biome-profile-grid"><div class="profile-range-group"><div class="profile-range-heading"><span>Temperature</span><output>${t0}°–${t1}°${state.temperatureUnit}</output></div><div class="biome-range-pair" data-range-pair="temperature"><input type="range" class="range-min" aria-label="${b.name} minimum temperature" min="${tempMin}" max="${tempMax}" step="1" data-profile="tempMin" data-index="${i}" value="${t0}"><input type="range" class="range-max" aria-label="${b.name} maximum temperature" min="${tempMin}" max="${tempMax}" step="1" data-profile="tempMax" data-index="${i}" value="${t1}"></div><div class="range-endpoints"><span>${tempMin}°${state.temperatureUnit}</span><span>${tempMax}°${state.temperatureUnit}</span></div></div><div class="profile-range-group"><div class="profile-range-heading"><span>Moisture</span><output>${Math.round((b.moistureMin ?? 0) * 100)}–${Math.round((b.moistureMax ?? 1) * 100)}%</output></div><div class="biome-range-pair" data-range-pair="moisture"><input type="range" class="range-min" aria-label="${b.name} minimum moisture" min="0" max="100" step="1" data-profile="moistureMin" data-index="${i}" value="${Math.round((b.moistureMin ?? 0) * 100)}"><input type="range" class="range-max" aria-label="${b.name} maximum moisture" min="0" max="100" step="1" data-profile="moistureMax" data-index="${i}" value="${Math.round((b.moistureMax ?? 1) * 100)}"></div><div class="range-endpoints"><span>0%</span><span>100%</span></div></div><div class="profile-range-group"><div class="profile-range-heading"><span>Elevation</span><output>${Math.round((b.elevationMin ?? 0) * 100)}–${Math.round((b.elevationMax ?? 1) * 100)}%</output></div><div class="biome-range-pair" data-range-pair="elevation"><input type="range" class="range-min" aria-label="${b.name} minimum elevation" min="0" max="100" step="1" data-profile="elevationMin" data-index="${i}" value="${Math.round((b.elevationMin ?? 0) * 100)}"><input type="range" class="range-max" aria-label="${b.name} maximum elevation" min="0" max="100" step="1" data-profile="elevationMax" data-index="${i}" value="${Math.round((b.elevationMax ?? 1) * 100)}"></div><div class="range-endpoints"><span>0%</span><span>100%</span></div></div></div>`;
+      profile.innerHTML = `<summary>${t0}°–${t1}°${state.temperatureUnit} · ${Math.round((b.moistureMin ?? 0) * 100)}–${Math.round((b.moistureMax ?? 1) * 100)}% moisture</summary><div class="biome-profile-grid"><div class="profile-range-group"><div class="profile-range-heading"><span>Temperature</span><output>${t0}°–${t1}°${state.temperatureUnit}</output></div><div class="biome-range-pair" data-range-pair="temperature"><input type="range" class="range-min" aria-label="${b.name} minimum temperature" min="${tempMin}" max="${tempMax}" step="1" data-profile="tempMin" data-index="${i}" value="${t0}"><input type="range" class="range-max" aria-label="${b.name} maximum temperature" min="${tempMin}" max="${tempMax}" step="1" data-profile="tempMax" data-index="${i}" value="${t1}"></div><div class="range-endpoints"><span>${tempMin}°${state.temperatureUnit}</span><span>${tempMax}°${state.temperatureUnit}</span></div></div><div class="profile-range-group"><div class="profile-range-heading"><span>Moisture</span><output>${Math.round((b.moistureMin ?? 0) * 100)}–${Math.round((b.moistureMax ?? 1) * 100)}%</output></div><div class="biome-range-pair" data-range-pair="moisture"><input type="range" class="range-min" aria-label="${b.name} minimum moisture" min="0" max="100" step="1" data-profile="moistureMin" data-index="${i}" value="${Math.round((b.moistureMin ?? 0) * 100)}"><input type="range" class="range-max" aria-label="${b.name} maximum moisture" min="0" max="100" step="1" data-profile="moistureMax" data-index="${i}" value="${Math.round((b.moistureMax ?? 1) * 100)}"></div><div class="range-endpoints"><span>0%</span><span>100%</span></div></div><div class="profile-range-group"><div class="profile-range-heading"><span>Sea-relative elevation</span><output>${Math.round((b.elevationMin ?? 0) * 100)}–${Math.round((b.elevationMax ?? 1) * 100)}%</output></div><div class="biome-range-pair" data-range-pair="elevation"><input type="range" class="range-min" aria-label="${b.name} minimum sea-relative elevation" min="-100" max="100" step="1" data-profile="elevationMin" data-index="${i}" value="${Math.round((b.elevationMin ?? 0) * 100)}"><input type="range" class="range-max" aria-label="${b.name} maximum sea-relative elevation" min="-100" max="100" step="1" data-profile="elevationMax" data-index="${i}" value="${Math.round((b.elevationMax ?? 1) * 100)}"></div><div class="range-endpoints"><span>−100% (deep)</span><span>+100% (high)</span></div></div></div>`;
       profile.addEventListener('toggle', syncBiomeCollapseButton);
       entry.append(row, profile); list.appendChild(entry);
       refreshBiomeProfile(i);
@@ -819,7 +858,7 @@
     $('#sampleHud').hidden = true;
     $('#sampleHint').textContent = 'HOVER OVER MAP'; $('#sampleBiome').lastElementChild.textContent = 'Move pointer over map';
     $('#sampleTemperature').textContent = '—'; $('#sampleMoisture').textContent = '—'; $('#sampleElevation').textContent = '—';
-    $('#biomeReason').textContent = state.distribution === 'balanced' ? 'Balanced mode ranks land by temperature, moisture, and elevation, then assigns even shares across enabled land biomes. Ocean is assigned below sea level.' : 'Natural mode assigns each land point to the enabled biome whose temperature, moisture, and elevation ranges are the closest match. Ocean is assigned below sea level.';
+    $('#biomeReason').textContent = state.distribution === 'balanced' ? 'Balanced mode shares land evenly across enabled land biomes. Underwater points use enabled water-biome temperature, moisture, and depth profiles.' : 'Land and underwater points are matched to enabled biomes using temperature, moisture, and sea-relative elevation. Sea level is 0%; water depth is negative.';
   });
   $('#terrainType').addEventListener('change', e => { state.terrain = e.target.value; syncShapeControls(); generate(); });
   $('#mapSize').addEventListener('change', e => { state.size = +e.target.value; syncSliders(); generate(); });
@@ -862,13 +901,38 @@
   $('#autoFeatures').addEventListener('change', generate); $('#flattenSettlements').addEventListener('change', generate);
   $$('.segmented button').forEach(b => b.addEventListener('click', () => { $$('.segmented button').forEach(x => x.classList.toggle('active', x === b)); state.distribution = b.dataset.distribution; if (state.height) { assignBiomes(readSettings().sea); render(); } }));
   $('#addBiome').addEventListener('click', () => {
-    if (state.biomes.length >= 32) return;
-    const presets = DEFAULT_BIOMES.filter(b => b.name !== 'Ocean'), used = new Set(state.biomes.map(b => b.name));
-    const preset = presets.find(b => !used.has(b.name)) || presets[0], biome = structuredClone(preset);
-    let serial = 2, name = preset.name; while (used.has(name)) name = `${preset.name} ${serial++}`;
-    biome.name = name; biome.enabled = true;
-    state.biomes.splice(Math.max(0, state.biomes.findIndex(b => b.name === 'Ocean')), 0, biome);
-    buildBiomeControls(); assignBiomes(readSettings().sea); render();
+    const list = $('#biomePresetList'), used = new Set(state.biomes.map(b => b.name));
+    list.replaceChildren();
+    const available = BIOME_PRESETS.filter(preset => !used.has(preset.name));
+    if (state.biomes.length >= 32 || !available.length) {
+      const note = document.createElement('p'); note.className = 'biome-picker-empty'; note.textContent = state.biomes.length >= 32 ? 'The biome limit is 32 profiles.' : 'All built-in presets are already in your map. Import or edit JSON to add custom profiles.'; list.append(note);
+    } else available.forEach(preset => {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'biome-preset';
+      const swatch = document.createElement('i'); swatch.style.background = preset.color;
+      const copy = document.createElement('span'); copy.innerHTML = `<b></b><small></small>`; copy.querySelector('b').textContent = preset.name; copy.querySelector('small').textContent = isWaterBiome(preset) ? 'Water profile' : `${preset.tempMin}° to ${preset.tempMax}°C · land`;
+      button.append(swatch, copy); button.addEventListener('click', () => {
+        if (state.biomes.length >= 32) return;
+        const biome = structuredClone(preset); biome.enabled = true;
+        const firstWater = state.biomes.findIndex(isWaterBiome);
+        state.biomes.splice(isWaterBiome(biome) || firstWater < 0 ? state.biomes.length : firstWater, 0, biome);
+        buildBiomeControls(); assignBiomes(readSettings().sea); render(); drawOverlays(); $('#biomePickerDialog').close();
+      }); list.append(button);
+    });
+    $('#biomePickerDialog').showModal();
+  });
+  $('#importBiomesBtn').addEventListener('click', () => $('#importBiomesFile').click());
+  $('#importBiomesFile').addEventListener('change', async e => {
+    const file = e.target.files?.[0]; if (!file) return;
+    try { const parsed = JSON.parse(await file.text()), list = Array.isArray(parsed) ? parsed : parsed?.biomes; applyBiomeList(list, true); showToast('Biome profiles imported'); }
+    catch (error) { showToast(`Biome import failed: ${error.message}`); }
+    e.target.value = '';
+  });
+  $('#exportBiomesBtn').addEventListener('click', () => { download(new Blob([JSON.stringify(state.biomes, null, 2)], { type: 'application/json' }), 'terra-biomes.json'); showToast('Biome profiles exported'); });
+  $('#editBiomesBtn').addEventListener('click', () => { $('#biomeJsonEditor').value = JSON.stringify(state.biomes, null, 2); $('#biomeJsonError').textContent = ''; $('#biomeJsonDialog').showModal(); });
+  $('#cancelBiomeJson').addEventListener('click', () => $('#biomeJsonDialog').close());
+  $('#applyBiomeJson').addEventListener('click', () => {
+    try { const parsed = JSON.parse($('#biomeJsonEditor').value), list = Array.isArray(parsed) ? parsed : parsed?.biomes; applyBiomeList(list, false); $('#biomeJsonDialog').close(); showToast('Biome profiles applied'); }
+    catch (error) { $('#biomeJsonError').textContent = error.message; }
   });
   $('#gridBtn').classList.toggle('active', state.grid);
   $('#gridBtn').addEventListener('click', () => { state.grid = !state.grid; $('#gridBtn').classList.toggle('active', state.grid); drawOverlays(); });
@@ -897,7 +961,7 @@
   $('#importSettings').addEventListener('change', async e => {
     const file = e.target.files?.[0]; if (!file) return;
     try {
-      const cfg = JSON.parse(await file.text()); if (!cfg || typeof cfg !== 'object') throw new Error('Invalid settings file');
+      const parsed = JSON.parse(await file.text()), biomeListOnly = Array.isArray(parsed), cfg = biomeListOnly ? { biomes: parsed } : parsed; if (!cfg || typeof cfg !== 'object') throw new Error('Invalid settings file');
       state.mapName = String(cfg.name || 'Imported landscape'); $('#projectTitle').textContent = state.mapName;
       if (typeof cfg.seed === 'string') $('#seed').value = cfg.seed.slice(0, 80);
       const importedSize = +cfg.size === 513 ? 505 : +cfg.size;
@@ -909,11 +973,10 @@
       if (settings.temperatureUnit === 'C' || settings.temperatureUnit === 'F') state.temperatureUnit = settings.temperatureUnit;
       for (const [key, id, scale, min, max] of [['peak','elevation',1,500,4500],['rough','roughness',100,5,100],['erosion','erosion',100,0,100],['sea','seaLevel',100,0,65],['islandSize','islandSize',100,65,145],['canyonWidth','canyonWidth',100,5,20],['ridgeStrength','ridgeStrength',100,0,100]]) if (Number.isFinite(+settings[key])) $(`#${id}`).value = clamp(Math.round(+settings[key] * scale), min, max);
       if ([384, 512, 768].includes(+settings.quality)) $('#quality').value = String(settings.quality);
-      if (Array.isArray(cfg.biomes) && cfg.biomes.length) state.biomes = cfg.biomes.slice(0, 32).map(item => {
-        const b = item && typeof item === 'object' ? item : {}, template = DEFAULT_BIOMES.find(p => p.name === b.name) || {};
-        const finite = (key, fallback) => Number.isFinite(+b[key]) ? +b[key] : (Number.isFinite(+template[key]) ? +template[key] : fallback);
-        return { name: String(b.name || 'Biome').replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 30) || 'Biome', color: /^#[0-9a-f]{6}$/i.test(b.color) ? b.color : '#777777', tempMin: finite('tempMin', -20), tempMax: finite('tempMax', 35), moistureMin: finite('moistureMin', 0), moistureMax: finite('moistureMax', 1), elevationMin: finite('elevationMin', 0), elevationMax: finite('elevationMax', 1), enabled: b.enabled !== false };
-      });
+      if (Array.isArray(cfg.biomes) && cfg.biomes.length) {
+        const importedBiomes = normalizeBiomeList(cfg.biomes), waterOnlyList = biomeListOnly && importedBiomes.every(isWaterBiome);
+        state.biomes = waterOnlyList ? [...state.biomes.filter(b => !isWaterBiome(b)), ...importedBiomes].slice(0, 32) : importedBiomes;
+      }
       if (cfg.features && typeof cfg.features === 'object') for (const k of Object.keys(state.features)) if (Number.isFinite(+cfg.features[k])) state.features[k] = clamp(Math.round(+cfg.features[k]), 0, 20);
       if (typeof settings.auto === 'boolean') $('#autoFeatures').checked = settings.auto;
       if (typeof settings.flatten === 'boolean') $('#flattenSettlements').checked = settings.flatten;

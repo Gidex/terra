@@ -24,6 +24,25 @@
 .shape-specific[hidden]{display:none!important}
 .export-extra{display:flex;align-items:center;gap:8px;margin:10px 0;color:#aab7ac;font-size:10px}
 .export-extra input{accent-color:#91c98a}
+.biome-actions{margin-top:8px}
+.biome-actions .add-biome{margin-top:0}
+.biome-json-actions{display:flex;justify-content:center;gap:20px;padding:9px 0 1px}
+.biome-json-actions .text-button{font-size:9px;color:#89998c}
+.biome-json-actions .text-button:hover{color:#c7e4bf}
+.biome-picker-dialog{max-height:min(76vh,680px);overflow:auto}
+.biome-preset-list{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.biome-preset{display:flex;align-items:center;gap:9px;min-width:0;padding:10px;border:1px solid #303d33;border-radius:6px;background:#1d2820;text-align:left;color:#c5d1c6}
+.biome-preset:hover{border-color:#719574;background:#243126}
+.biome-preset i{width:14px;height:14px;flex:0 0 14px;border:1px solid #ffffff30;border-radius:4px}
+.biome-preset b,.biome-preset small{display:block}
+.biome-preset b{font-size:10px;font-weight:600}
+.biome-preset small{margin-top:3px;font:8px var(--mono);color:#839187}
+.biome-picker-empty{grid-column:1/-1;margin:0;padding:16px;border:1px dashed #39473c;border-radius:5px;color:#9aa69b;font-size:11px;line-height:1.5}
+.biome-json-dialog{width:min(600px,calc(100vw - 30px))}
+.biome-json-dialog textarea{display:block;width:100%;height:min(52vh,480px);resize:vertical;padding:12px;border:1px solid #354338;border-radius:6px;background:#111814;color:#c7d6c8;font:11px/1.5 var(--mono);tab-size:2}
+.biome-json-error{min-height:18px;margin-top:7px;color:#e09b88;font-size:10px}
+.biome-json-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+@media(max-width:480px){.biome-preset-list{grid-template-columns:1fr}}
 .import-settings{display:inline-block;margin-top:10px}
 .draw-history{display:flex;gap:5px;margin:10px 0}
 .draw-history button{flex:1;border:1px solid #39473b;border-radius:4px;background:#202a22;color:#aab9aa;padding:5px 3px;font-size:9px}
