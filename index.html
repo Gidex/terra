@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f2efe6" />
+  <meta name="description" content="Generate procedural Unreal Engine heightmaps in your browser. Shape terrain, blend climate-based biomes, place rivers and roads, preview layers, and export 16-bit PNG heightmaps, masks, and import presets." />
+  <meta name="robots" content="index,follow" />
+  <link rel="canonical" href="https://gidex.github.io/terra/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://gidex.github.io/terra/" />
+  <meta property="og:site_name" content="Terra Heightmap Studio" />
+  <meta property="og:title" content="Terra — Unreal Engine Heightmap Generator" />
+  <meta property="og:description" content="Build procedural terrain in your browser and export Unreal-ready heightmaps, biome maps, masks, and import presets." />
+  <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Terra — Unreal Engine Heightmap Generator" />
+  <meta name="twitter:description" content="Build procedural terrain in your browser and export Unreal-ready heightmaps, biome maps, masks, and import presets." />
+  <title>Terra — Unreal Engine Heightmap Generator</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="cartography.css" />
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Terra Heightmap Studio",
+      "url": "https://gidex.github.io/terra/",
+      "applicationCategory": "DesignApplication",
+      "operatingSystem": "Any",
+      "browserRequirements": "Requires a modern browser with JavaScript and Web Workers",
+      "description": "A browser-based procedural terrain generator for Unreal Engine. Create heightmaps with climate-based biomes and terrain features, then export heightmaps, biome maps, masks, and import presets.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar" aria-label="Terra Heightmap Studio">
+    <a class="brand" href="./" aria-label="Terra Heightmap Studio home"><span class="brand-mark" aria-hidden="true">T</span><span><h1 class="brand-name">TERRA</h1><span class="brand-sub">HEIGHTMAP STUDIO</span></span></a>
+    <div class="project-name"><span class="status-dot"></span><span id="projectTitle">Untitled landscape</span><button class="icon-button" id="renameBtn" aria-label="Rename project">✎</button></div>
+    <div class="top-actions"><button class="button quiet controls-button" id="controlsBtn" aria-expanded="false" aria-controls="sidebar">☷ <span>Controls</span></button><button class="button quiet" id="randomizeBtn">↻ <span>New seed</span></button><button class="button primary" id="exportBtn">⇩ <span>Export</span></button></div>
+  </header>
+  <div class="sidebar-scrim" id="sidebarScrim" hidden></div>
+
+  <main class="workspace" aria-label="Procedural heightmap generator for Unreal Engine">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-scroll">
+        <section class="section-block">
+          <div class="section-heading"><span class="eyebrow">World setup</span><span class="step-check">✓</span></div>
+          <label class="field-label" for="terrainType">Terrain archetype</label>
+          <select id="terrainType" class="select-input">
+            <option value="island">✦  Island</option><option value="canyon">⌁  Canyon system</option><option value="highland">▲  Mountain basin</option><option value="volcanic">◉  Volcanic caldera</option><option value="coastal">⌒  Coastal shelf</option><option value="plateau">▰  High plateau</option><option value="archipelago">∿  Archipelago</option><option value="valley">▽  River valley</option><option value="mesa">▰  Mesa badlands</option><option value="dunes">≈  Dune sea</option><option value="fjord">⌇  Glacial fjord</option>
+          </select>
+          <div class="field-row"><label class="field-label" for="mapSize">Landscape size</label><span class="field-value" id="sizeValue">2017 × 2017</span></div>
+          <select id="mapSize" class="select-input"><option value="505">505 × 505 · 1 km</option><option value="1009">1009 × 1009 · 2 km</option><option value="2017" selected>2017 × 2017 · 4 km</option><option value="4033">4033 × 4033 · 8 km</option></select>
+          <div class="field-row"><label class="field-label" for="quality">Generation quality</label><span class="field-value">Working grid</span></div>
+          <select id="quality" class="select-input"><option value="384" selected>Standard · 384²</option><option value="512">High · 512²</option><option value="768">Ultra · 768²</option></select>
+          <div class="field-row"><label class="field-label" for="seed">World seed</label><button class="text-button" id="seedBtn" title="Create a new random seed">↻ New seed</button></div>
+          <div class="seed-wrap"><input id="seed" type="text" value="" autocomplete="off" spellcheck="false" aria-label="World seed" title="Editable text seed — type any value and press Enter"/><button class="seed-copy" id="copySeedBtn" title="Copy seed" aria-label="Copy seed">⧉</button></div>
+          <small class="seed-hint">Type a seed and press Enter to regenerate</small>
+        </section>
+
+        <section class="section-block">
+          <div class="section-heading"><span class="eyebrow">Terrain shape</span><button class="collapse-button" aria-label="Collapse terrain settings" aria-expanded="true">−</button></div>
+          <div class="slider-field"><div class="field-row"><label class="field-label" for="elevation">Peak elevation</label><span class="field-value" id="elevationValue">1,840 m</span></div><input id="elevation" type="range" min="500" max="4500" value="1840" /></div>
+          <div class="slider-field"><div class="field-row"><label class="field-label" for="roughness">Terrain roughness</label><span class="field-value" id="roughnessValue">62%</span></div><input id="roughness" type="range" min="5" max="100" value="62" /></div>
+          <div class="slider-field"><div class="field-row"><label class="field-label" for="erosion">Erosion</label><span class="field-value" id="erosionValue">34%</span></div><input id="erosion" type="range" min="0" max="100" value="34" /></div>
+          <div class="slider-field"><div class="field-row"><label class="field-label" for="seaLevel">Sea level</label><span class="field-value" id="seaLevelValue">28%</span></div><input id="seaLevel" type="range" min="0" max="65" value="28" /></div>
+          <div class="slider-field shape-specific" data-shapes="island,archipelago"><div class="field-row"><label class="field-label" for="islandSize">Island landmass</label><span class="field-value" id="islandSizeValue">100%</span></div><input id="islandSize" type="range" min="65" max="145" value="100" /></div>
+          <div class="slider-field shape-specific" data-shapes="canyon"><div class="field-row"><label class="field-label" for="canyonWidth">Canyon width</label><span class="field-value" id="canyonWidthValue">10%</span></div><input id="canyonWidth" type="range" min="5" max="20" value="10" /></div>
+          <div class="slider-field shape-specific" data-shapes="highland"><div class="field-row"><label class="field-label" for="ridgeStrength">Ridge strength</label><span class="field-value" id="ridgeStrengthValue">55%</span></div><input id="ridgeStrength" type="range" min="0" max="100" value="55" /></div>
+        </section>
+
+        <section class="section-block biome-section">
+          <div class="section-heading"><span class="eyebrow">Biomes</span><span class="count-pill" id="biomeCount">11 active</span></div>
+          <div class="field-row climate-heading"><label class="field-label" for="climateTemp">World temperature shift</label><span><output class="field-value" id="climateTempValue">0 °C</output> <button class="unit-toggle" id="temperatureUnit" type="button" aria-label="Switch temperature units">°C</button></span></div>
+          <input id="climateTemp" class="climate-slider" type="range" min="-15" max="15" value="0" step="1" />
+          <small class="seed-hint">Shifts the climate used to place biomes.</small>
+          <div id="biomeList" class="biome-list"></div>
+          <button class="add-biome" id="addBiome"><span>＋</span> Add biome</button>
+          <div class="biome-options"><span>Distribution</span><div class="segmented"><button class="active" data-distribution="natural">Climate</button><button data-distribution="balanced">Balanced</button></div></div>
+          <small class="seed-hint">Climate uses each biome’s temperature, moisture, and elevation ranges. Percentages show the resulting map area.</small>
+        </section>
+
+        <section class="section-block features-section">
+          <div class="section-heading"><span class="eyebrow">Features</span><span class="hint">Place or draw</span></div>
+          <div class="feature-list">
+            <div class="feature-row" data-feature-row="rivers"><span class="feature-icon river-icon">⌁</span><span>Rivers</span><button class="feature-step" data-feature="rivers" data-delta="-1" aria-label="Remove a river">−</button><output data-count="rivers">0</output><button class="feature-step" data-feature="rivers" data-delta="1" aria-label="Add a river">＋</button></div>
+            <div class="feature-row" data-feature-row="lakes"><span class="feature-icon lake-icon">◉</span><span>Lakes</span><button class="feature-step" data-feature="lakes" data-delta="-1" aria-label="Remove a lake">−</button><output data-count="lakes">0</output><button class="feature-step" data-feature="lakes" data-delta="1" aria-label="Add a lake">＋</button></div>
+            <div class="feature-row" data-feature-row="roads"><span class="feature-icon road-icon">⌑</span><span>Roads</span><button class="feature-step" data-feature="roads" data-delta="-1" aria-label="Remove a road">−</button><output data-count="roads">0</output><button class="feature-step" data-feature="roads" data-delta="1" aria-label="Add a road">＋</button></div>
+            <div class="feature-row" data-feature-row="cities"><span class="feature-icon city-icon">▦</span><span>Cities</span><button class="feature-step" data-feature="cities" data-delta="-1" aria-label="Remove a city">−</button><output data-count="cities">0</output><button class="feature-step" data-feature="cities" data-delta="1" aria-label="Add a city">＋</button></div>
+            <div class="feature-row" data-feature-row="villages"><span class="feature-icon village-icon">⌂</span><span>Villages</span><button class="feature-step" data-feature="villages" data-delta="-1" aria-label="Remove a village">−</button><output data-count="villages">0</output><button class="feature-step" data-feature="villages" data-delta="1" aria-label="Add a village">＋</button></div>
+            <div class="feature-row" data-feature-row="peaks"><span class="feature-icon peak-icon">△</span><span>Peaks</span><button class="feature-step" data-feature="peaks" data-delta="-1" aria-label="Remove a peak">−</button><output data-count="peaks">0</output><button class="feature-step" data-feature="peaks" data-delta="1" aria-label="Add a peak">＋</button></div>
+          </div>
+          <small class="seed-hint" id="featureStatus">Auto placement counts will appear after generation.</small>
+          <div class="feature-settings"><label class="check-row"><input type="checkbox" id="autoFeatures" checked /><span class="checkmark"></span><span>Place features automatically</span></label><label class="check-row"><input type="checkbox" id="flattenSettlements" checked /><span class="checkmark"></span><span>Flatten settlement areas</span></label></div>
+        </section>
+      </div>
+      <div class="sidebar-footer"><span class="keyboard-hint">Ctrl / ⌘ ↵ <span>Regenerate map</span></span><span class="version">v0.1.0</span></div>
+    </aside>
+
+    <section class="canvas-area">
+      <div class="canvas-toolbar"><div class="view-tabs" role="tablist"><button class="view-tab active" data-view="height">Heightmap</button><button class="view-tab" data-view="relief" title="Elevation colors with directional hillshade to make ridges, slopes, and valleys easier to read">Relief ⓘ</button><button class="view-tab" data-view="biomes">Biomes</button><button class="view-tab" data-view="climate">Climate</button><button class="view-tab" data-view="moisture">Moisture</button><button class="view-tab" data-view="texture">Terrain</button><button class="view-tab" data-view="profile">Side view</button></div><div class="canvas-tools"><button class="tool-button" id="gridBtn" title="Show a coordinate grid over the map">▦ <span>Grid</span></button><button class="tool-button" id="drawBtn" title="Toggle drawing tools">✎ <span>Draw</span></button><span class="toolbar-divider"></span><button class="tool-button square" id="zoomOut" aria-label="Zoom out">−</button><span class="zoom-level" id="zoomLevel">100%</span><button class="tool-button square" id="zoomIn" aria-label="Zoom in">＋</button><button class="tool-button square fullscreen" id="fullscreenBtn" aria-label="Fullscreen">⛶</button></div></div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <div class="map-stage" id="mapStage"><canvas id="mapCanvas" width="640" height="640" aria-label="Generated landscape preview"></canvas><canvas id="overlayCanvas" width="640" height="640" aria-label="Map drawing layer"></canvas></div>
+        <div class="empty-loading" id="loading"><div class="loader"></div><span>Shaping your world…</span></div>
+        <div class="climate-legend" id="climateLegend" hidden><span class="climate-label" id="climateLabel">TEMPERATURE</span><span class="climate-bound" id="climateMin">−20°C</span><span class="climate-ramp" id="climateRamp" role="img" aria-label="Temperature color scale from cold to hot"></span><span class="climate-bound" id="climateMax">35°C</span><span class="climate-end-labels" id="climateEndLabels"><span>Cold</span><span>Hot</span></span></div>
+        <div class="sample-hud" id="sampleHud" hidden><div class="sample-hud-head"><span id="sampleHudBiome">Biome at pointer</span><span id="sampleHudPosition">X — · Y —</span></div><div class="sample-hud-values"><span id="sampleHudTemperature">—</span><span id="sampleHudMoisture">—</span><span id="sampleHudElevation">—</span></div><p id="sampleHudReason"></p></div>
+        <div class="draw-panel" id="drawPanel"><div class="draw-panel-head"><span>DRAW FEATURE</span><button id="closeDraw" aria-label="Close drawing tools">×</button></div><div class="draw-tool-list"><button class="draw-tool active" data-draw="river">⌁ <span>River</span></button><button class="draw-tool" data-draw="road">⌑ <span>Road</span></button><button class="draw-tool" data-draw="lake">◉ <span>Lake</span></button><button class="draw-tool" data-draw="mountain">△ <span>Mountain</span></button><button class="draw-tool" data-draw="city">▦ <span>City</span></button><button class="draw-tool" data-draw="village">⌂ <span>Village</span></button><button class="draw-tool" data-draw="select">↖ <span>Select / move</span></button></div><div class="brush-control"><label for="brushSize">Brush size <span id="brushValue">3%</span></label><input id="brushSize" type="range" min="1" max="12" value="3" /></div><div class="draw-history"><button id="undoDraw" type="button">↶ Undo</button><button id="redoDraw" type="button">↷ Redo</button><button id="deleteLastDraw" type="button">Delete last</button></div><div class="drawn-feature-list" id="drawnFeatureList"></div><button class="clear-draw" id="clearDraw">Clear drawn features</button></div>
+        <div class="canvas-caption"><div class="caption-label"><span class="caption-dot"></span><span id="captionTitle">HEIGHT FIELD</span></div><span id="captionDimensions">2017 × 2017 px</span></div>
+        <div class="map-compass"><span>N</span><div class="compass-arrow">▲</div></div>
+        <div class="map-coordinates" title="This map has no geographic coordinates">LOCAL MAP · NO GEOREFERENCE</div>
+      </div>
+      <div class="bottom-strip"><div class="stat"><span class="stat-icon">⌁</span><span><b id="heightStat">1,840 m</b><small>MAX ELEVATION</small></span></div><div class="stat"><span class="stat-icon water-stat">◉</span><span><b id="waterStat">28%</b><small>WATER COVER</small></span></div><div class="stat"><span class="stat-icon area-stat">▧</span><span><b id="areaStat">12.4 km²</b><small>LAND AREA</small></span></div><div class="stat"><span class="stat-icon seed-stat">◇</span><span><b id="seedStat">—</b><small>WORLD SEED</small></span></div><div class="generation-status"><span class="status-dot"></span><span id="statusText">GENERATING</span><span class="status-separator">·</span><span id="generationTime">—</span></div></div>
+    </section>
+
+    <aside class="inspector">
+      <div class="inspector-head"><div><span class="eyebrow">WORLD OVERVIEW</span><h2>Landscape</h2></div><button class="icon-button" id="saveBtn" title="Save configuration">↗</button></div>
+      <div class="inspector-section"><div class="inspector-title"><span>Elevation profile · E—W</span><button class="icon-button small" id="profileViewBtn" title="Open the full side profile" aria-label="Open the full side profile">⌁</button></div><canvas id="profileCanvas" width="270" height="100"></canvas><div class="profile-labels"><span>0 m</span><span id="profileMax">1,840 m</span></div></div>
+      <div class="inspector-section biome-inspector" id="biomeInspector"><div class="inspector-title"><span>Biome at pointer</span><span class="sample-hint" id="sampleHint">HOVER OVER MAP</span></div><div class="sample-biome" id="sampleBiome"><span class="sample-swatch"></span><span>Move pointer over map</span></div><div class="sample-metrics"><div><small>TEMPERATURE</small><b id="sampleTemperature">—</b></div><div><small>MOISTURE</small><b id="sampleMoisture">—</b></div><div><small>RELATIVE ELEVATION</small><b id="sampleElevation">—</b></div></div><p class="biome-reason" id="biomeReason">In Natural mode, land gets the biome whose temperature, moisture, and elevation ranges are the closest match. Ocean is assigned below sea level.</p><p class="biome-note">Climate and moisture are procedural estimates, not a weather or rainfall simulation.</p></div>
+      <div class="inspector-section"><div class="inspector-title"><span>Biome distribution</span><button class="text-button" id="biomeExportBtn">Export</button></div><div id="distributionList" class="distribution-list"></div></div>
+      <div class="inspector-section layers-section"><div class="inspector-title"><span>Map layers</span><button class="icon-button small" id="layersToggle" title="Toggle layers">⌄</button></div><div class="layer-list" id="layerList"><label class="layer-row"><input type="checkbox" checked data-layer="water" title="Water styling in relief and terrain previews"/><span class="layer-swatch water-swatch"></span><span>Water</span><span class="layer-opacity">100%</span></label><label class="layer-row"><input type="checkbox" checked data-layer="contours" title="Contour lines on the relief preview"/><span class="layer-swatch contour-swatch"></span><span>Contours</span><span class="layer-opacity">35%</span></label><label class="layer-row"><input type="checkbox" checked data-layer="features"/><span class="layer-swatch feature-swatch"></span><span>Features</span><span class="layer-opacity">100%</span></label></div></div>
+      <div class="inspector-note"><span aria-hidden="true">✦</span><p>Build procedural Unreal terrain with climate-driven biomes, rivers, roads, and settlements. Export 16-bit heightmaps, biome maps, masks, and import presets. All maps are generated locally in your browser.</p></div>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+  <dialog id="exportDialog" class="export-dialog"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><span class="eyebrow">READY FOR UNREAL ENGINE</span><h2>Export your landscape</h2><p>Choose the files to include in your export.</p><label class="export-option"><input type="checkbox" id="exportHeight" checked/><span class="export-check"></span><span><b>16 bit heightmap</b><small>Grayscale PNG · Linear elevation recommended for Unreal</small></span><span class="file-ext">.PNG</span></label><label class="export-option"><input type="checkbox" id="exportBiome" checked/><span class="export-check"></span><span><b>Biome color map</b><small>RGB PNG · One editable color per biome</small></span><span class="file-ext">.PNG</span></label><label class="export-option"><input type="checkbox" id="exportMasks"/><span class="export-check"></span><span><b>Biome and feature masks</b><small>Grayscale layer masks, combined by biome or feature type</small></span><span class="file-ext">.PNG</span></label><label class="export-option"><input type="checkbox" id="exportConfig"/><span class="export-check"></span><span><b>World settings</b><small>Seed, biomes and generation parameters</small></span><span class="file-ext">.JSON</span></label><label class="export-option"><input type="checkbox" id="exportUnreal" checked/><span class="export-check"></span><span><b>Unreal import preset and guide</b><small>Landscape dimensions, XY/Z scale, file manifest, and import steps</small></span><span class="file-ext">.JSON + .MD</span></label><label class="check-row export-extra"><input type="checkbox" id="linearHeight" checked/><span class="checkmark"></span><span>Linear height values (recommended for Unreal)</span></label><label class="check-row export-extra"><input type="checkbox" id="exportBundle"/><span class="checkmark"></span><span>Bundle selected files into one ZIP</span></label><button class="text-button import-settings" id="importSettingsBtn" type="button">Import settings JSON</button><input id="importSettings" type="file" accept="application/json,.json" hidden/><button class="button primary export-confirm" id="confirmExport">⇩ <span>Download selected files</span></button><div class="export-foot">Heightmaps are 16 bit grayscale PNGs. The preset is tailored to the selected Landscape size.</div></dialog>
+  <script src="app.js"></script>
+</body>
+</html>

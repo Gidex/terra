@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://gidex.github.io/terra/sitemap.xml
