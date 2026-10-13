@@ -801,8 +801,22 @@
   }
   function sampleHeight(x, y) { const fx = x / (state.size - 1) * (SIZE - 1), fy = y / (state.size - 1) * (SIZE - 1), x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(SIZE - 1, x0 + 1), y1 = Math.min(SIZE - 1, y0 + 1), tx = fx - x0, ty = fy - y0; return lerp(lerp(state.height[y0 * SIZE + x0], state.height[y0 * SIZE + x1], tx), lerp(state.height[y1 * SIZE + x0], state.height[y1 * SIZE + x1], tx), ty); }
   function sampleBiome(x, y) { const ix = Math.floor(x / (state.size - 1) * (SIZE - 1)), iy = Math.floor(y / (state.size - 1) * (SIZE - 1)); return state.biomeMap[iy * SIZE + ix] || 0; }
+  function updateUnrealImportHint() {
+    const w = state.size, quads = w - 1, sectionQuads = 63, sectionsPerComponent = 4, componentQuads = sectionQuads * 2;
+    const components = quads / componentQuads, worldKm = ({ 505: 1, 1009: 2, 2017: 4, 4033: 8 })[w] || 4;
+    const xyScale = worldKm * 100000 / quads;
+    let minHeight = state.height?.length ? 1 : 0, maxHeight = state.height?.length ? 0 : 1;
+    for (const value of state.height || []) { minHeight = Math.min(minHeight, value); maxHeight = Math.max(maxHeight, value); }
+    const linear = $('#linearHeight').checked, sea = readSettings().sea;
+    const encodedMin = linear ? minHeight : heightmapValue(minHeight, sea), encodedMax = linear ? maxHeight : heightmapValue(maxHeight, sea);
+    const verticalRangeM = (maxHeight - minHeight) * (state.elevation || readSettings().peak);
+    const encodedRange = encodedMax - encodedMin;
+    const zScale = encodedRange > 0 ? verticalRangeM * 100 / (encodedRange * 512) : 1;
+    const meshSizeZCm = encodedRange > 0 ? verticalRangeM * 100 / encodedRange : (state.elevation || readSettings().peak) * 100;
+    $('#unrealImportHint').innerHTML = `<div class="unreal-import-title">Unreal heightmap import · ${linear ? 'linear' : 'sea-emphasized'} values</div><div class="unreal-import-options"><section><b>Landscape</b><span>${w} × ${w} resolution · ${sectionQuads}-quad sections</span><span>${sectionsPerComponent} sections/component (2 × 2) · ${components} × ${components} components</span><span>Scale X/Y ${xyScale.toFixed(2)} cm · Z ${zScale.toFixed(2)}</span></section><section><b>Mesh Terrain</b><span>Resolution ${quads} × ${quads} quads</span><span>Size X/Y ${(worldKm * 100000).toFixed(0)} cm · Z ${meshSizeZCm.toFixed(0)} cm</span><span>Sections: Automatic · Max triangles: 524,288</span></section></div>`;
+  }
   async function exportFiles() {
-    if (!$('#exportHeight').checked && !$('#exportBiome').checked && !$('#exportMasks').checked && !$('#exportConfig').checked && !$('#exportUnreal').checked) { showToast('Choose at least one file to export'); return; }
+    if (!$('#exportHeight').checked && !$('#exportBiome').checked && !$('#exportMasks').checked && !$('#exportConfig').checked) { showToast('Choose at least one file to export'); return; }
     const w = state.size, h = w, base = (state.mapName || 'landscape').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'landscape'; $('#statusText').textContent = 'EXPORTING'; $('#confirmExport').disabled = true;
     try {
       const files = [];
@@ -813,23 +827,6 @@
         files.push(...await featureMaskFiles(w, h, base));
       }
       if ($('#exportConfig').checked) { const cfg = { name: state.mapName, seed: state.seed, size: w, terrain: state.terrain, distribution: state.distribution, settings: readSettings(), biomes: state.biomes, features: state.features, drawnFeatures: state.drawn }; files.push({ blob: new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' }), name: `${base}-settings.json`, manifest: { file: `${base}-settings.json`, kind: 'world-settings', width: w, height: h } }); }
-      if ($('#exportUnreal').checked) {
-        const quads = w - 1, sectionSizeQuads = 63, sectionsPerComponent = 4, componentQuads = sectionSizeQuads * 2, componentsPerSide = quads / componentQuads;
-        const worldKm = ({ 505: 1, 1009: 2, 2017: 4, 4033: 8 })[w] || 4, worldWidthM = worldKm * 1000, xyScaleCm = worldWidthM * 100 / quads;
-        let minNormalizedHeight = 1, maxNormalizedHeight = 0;
-        for (const value of state.height) { if (value < minNormalizedHeight) minNormalizedHeight = value; if (value > maxNormalizedHeight) maxNormalizedHeight = value; }
-        const linearHeight = $('#linearHeight').checked, seaLevel = readSettings().sea;
-        const exportedMinHeight = linearHeight ? minNormalizedHeight : heightmapValue(minNormalizedHeight, seaLevel), exportedMaxHeight = linearHeight ? maxNormalizedHeight : heightmapValue(maxNormalizedHeight, seaLevel);
-        const verticalRangeMeters = (exportedMaxHeight - exportedMinHeight) * state.elevation, zScale = verticalRangeMeters * 100 / 512;
-        const biomePalette = state.biomes.map((b, index) => ({ index, name: b.name, color: b.color, enabled: b.enabled }));
-        const preset = { schemaVersion: 1, application: 'Terra Heightmap Studio', unreal: { landscapeResolution: `${w}x${h}`, sectionSizeQuads, sectionsPerComponent, components: `${componentsPerSide}x${componentsPerSide}`, totalComponents: componentsPerSide * componentsPerSide, scaleCm: { x: xyScaleCm, y: xyScaleCm, z: zScale }, worldSizeMeters: { x: worldWidthM, y: worldWidthM }, normalizedHeightRange: { min: exportedMinHeight, max: exportedMaxHeight }, verticalRangeMeters, heightmapEncoding: linearHeight ? 'linear-normalized-16bit-grayscale' : 'sea-emphasized-16bit-grayscale', zScaleFormula: '(maxExportHeight - minExportHeight) * configuredPeakElevationMeters * 100 / 512' }, biomePalette, files: files.map(file => file.manifest).filter(Boolean), source: { seed: state.seed, terrain: state.terrain, climateOffsetC: state.climateOffset, seaLevelNormalized: seaLevel }, references: ['https://dev.epicgames.com/documentation/unreal-engine/importing-and-exporting-landscape-heightmaps-in-unreal-engine', 'https://dev.epicgames.com/documentation/unreal-engine/landscape-technical-guide-in-unreal-engine'] };
-        const presetName = `${base}-unreal-import.json`;
-        files.push({ blob: new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' }), name: presetName });
-        const heightmapName = `${base}-height-${$('#linearHeight').checked ? 'linear-' : ''}${w}x${h}.png`;
-        const heightInstruction = $('#exportHeight').checked ? `2. Select the matching **${heightmapName}** 16-bit grayscale PNG.` : '2. Include the 16-bit heightmap in the export and select it here.';
-        const guide = `# Unreal Engine Landscape Import\n\nGenerated for **${state.mapName}** (${w} × ${h} vertices).\n\n## Heightmap import\n\n1. Open Landscape mode and choose **Import from File**.\n${heightInstruction} Keep **Flip Y Axis** off initially; enable it only if your project needs the opposite north/south orientation.\n3. The suggested Landscape layout is ${sectionSizeQuads} quads per section, 4 sections per component (2 × 2), and ${componentsPerSide} × ${componentsPerSide} components. Unreal can also auto-select a compatible layout from the heightmap resolution.\n4. Set X and Y scale to **${xyScaleCm.toFixed(2)} cm** per vertex for an approximately ${worldKm} km × ${worldKm} km landscape.\n5. Set Z scale to **${zScale.toFixed(2)}** for an approximately ${verticalRangeMeters.toFixed(1)} m vertical range. Unreal centers imported height values around the Landscape origin; adjust the Landscape Z location to place sea level or another datum where desired.\n6. Import, then verify the visible dimensions and elevation against your level scale.\n\n## Biome and feature layers\n\nThe matching grayscale masks use 0 outside and 255 inside each layer. Biome masks are generated only for biomes present in the map. Feature masks are combined by feature type. Create matching Landscape material layer names and import/paint the masks as layer data; these files do not create a material automatically. The RGB biome map is a visual palette reference.\n\n## Height values\n\nThis preset records **${preset.unreal.heightmapEncoding}**. Linear mode preserves normalized terrain height and is recommended for Unreal. Sea-emphasized mode changes the grayscale mapping around sea level for visual readability, so its vertical values are not linear.\n\nThe companion **${presetName}** lists the selected rasters, resolution, mask meaning, biome colors, and suggested Landscape settings.\n\n## Epic documentation\n\n- [Importing and Exporting Landscape Heightmaps](https://dev.epicgames.com/documentation/unreal-engine/importing-and-exporting-landscape-heightmaps-in-unreal-engine)\n- [Landscape Technical Guide](https://dev.epicgames.com/documentation/unreal-engine/landscape-technical-guide-in-unreal-engine)\n`;
-        files.push({ blob: new Blob([guide], { type: 'text/markdown' }), name: `${base}-unreal-import-guide.md` });
-      }
       if ($('#exportBundle').checked) download(await zipStore(files), `${base}-export.zip`); else files.forEach(file => download(file.blob, file.name));
       $('#exportDialog').close(); showToast('Export complete — files downloaded');
     } catch (e) { console.error(e); showToast(`Export failed: ${e.message || 'browser compression unavailable'}`); }
@@ -986,7 +983,7 @@
     e.target.value = '';
   });
   $('#renameBtn').addEventListener('click', () => { const n = prompt('Name this landscape', state.mapName); if (n && n.trim()) { state.mapName = n.trim(); $('#projectTitle').textContent = state.mapName; } });
-  $('#exportBtn').addEventListener('click', () => $('#exportDialog').showModal()); $('#confirmExport').addEventListener('click', e => { e.preventDefault(); exportFiles(); }); $('#biomeExportBtn').addEventListener('click', csvExport);
+  $('#exportBtn').addEventListener('click', () => { updateUnrealImportHint(); $('#exportDialog').showModal(); }); $('#linearHeight').addEventListener('change', updateUnrealImportHint); $('#confirmExport').addEventListener('click', e => { e.preventDefault(); exportFiles(); }); $('#biomeExportBtn').addEventListener('click', csvExport);
   $('#layersToggle').addEventListener('click', e => { const hidden = e.currentTarget.dataset.hidden !== 'true'; e.currentTarget.dataset.hidden = hidden ? 'true' : 'false'; e.currentTarget.textContent = hidden ? '›' : '⌄'; $('#layerList').style.display = hidden ? 'none' : 'flex'; });
   $$('.layer-row input').forEach(c => c.addEventListener('change', () => { if (c.dataset.layer === 'features') drawOverlays(); if (c.dataset.layer === 'water' || c.dataset.layer === 'contours') render(); }));
   $('#mapStage').addEventListener('dblclick', () => { state.zoom = state.zoom === 1 ? 1.25 : 1; $('#mapStage').style.transform = `scale(${state.zoom})`; $('#zoomLevel').textContent = `${Math.round(state.zoom * 100)}%`; });
