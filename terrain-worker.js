@@ -166,8 +166,7 @@ function generate({ id, size, seed, terrain, rough, erosion, islandSize, canyonW
       }
       case 'dunes': {
         const dPhase = nx * 32 + ny * 8 + fractal(nx * 2, ny * 2, seed) * 4.5;
-        const normPhase = (dPhase % (Math.PI * 2) + (Math.PI * 2)) % (Math.PI * 2);
-        const ridge = Math.pow(Math.sin(normPhase * 0.5), 1.6);
+        const ridge = Math.pow((1 + Math.sin(dPhase)) * 0.5, 1.6);
         base = .34 + ridge * .25 + Math.sin(nx * 8 + ny * 12) * .025 + detail * .3;
         break;
       }
@@ -186,7 +185,9 @@ function generate({ id, size, seed, terrain, rough, erosion, islandSize, canyonW
     const maxSlope = 0.055 - erosion * 0.035;
     const passes = Math.min(3, Math.max(1, Math.round(erosion * 2.5)));
     const rate = 0.25;
+    const delta = new Float32Array(heights.length);
     for (let p = 0; p < passes; p++) {
+      delta.fill(0);
       for (let y = 1; y < size - 1; y++) {
         for (let x = 1; x < size - 1; x++) {
           const i = y * size + x;
@@ -197,14 +198,16 @@ function generate({ id, size, seed, terrain, rough, erosion, islandSize, canyonW
           const diff = h - minN;
           if (diff > maxSlope) {
             const transfer = (diff - maxSlope) * rate;
-            heights[i] -= transfer;
-            if (minN === nT) heights[(y - 1) * size + x] += transfer;
-            else if (minN === nB) heights[(y + 1) * size + x] += transfer;
-            else if (minN === nL) heights[y * size + (x - 1)] += transfer;
-            else heights[y * size + (x + 1)] += transfer;
+            let target = (y - 1) * size + x;
+            if (minN === nB) target = (y + 1) * size + x;
+            else if (minN === nL) target = y * size + (x - 1);
+            else if (minN === nR) target = y * size + (x + 1);
+            delta[i] -= transfer;
+            delta[target] += transfer;
           }
         }
       }
+      for (let i = 0; i < heights.length; i++) heights[i] = clamp(heights[i] + delta[i]);
     }
   }
 

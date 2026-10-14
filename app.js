@@ -198,8 +198,7 @@
         }
         case 'dunes': {
           const dPhase = nx * 32 + ny * 8 + fractal(nx * 2, ny * 2, seed) * 4.5;
-          const normPhase = (dPhase % (Math.PI * 2) + (Math.PI * 2)) % (Math.PI * 2);
-          const ridge = Math.pow(Math.sin(normPhase * 0.5), 1.6);
+          const ridge = Math.pow((1 + Math.sin(dPhase)) * 0.5, 1.6);
           base = .34 + ridge * .25 + Math.sin(nx * 8 + ny * 12) * .025 + detail * .3;
           break;
         }
@@ -217,7 +216,9 @@
       const maxSlope = 0.055 - erosion * 0.035;
       const passes = Math.min(3, Math.max(1, Math.round(erosion * 2.5)));
       const rate = 0.25;
+      const delta = new Float32Array(heights.length);
       for (let p = 0; p < passes; p++) {
+        delta.fill(0);
         for (let y = 1; y < size - 1; y++) {
           for (let x = 1; x < size - 1; x++) {
             const i = y * size + x;
@@ -228,14 +229,16 @@
             const diff = h - minN;
             if (diff > maxSlope) {
               const transfer = (diff - maxSlope) * rate;
-              heights[i] -= transfer;
-              if (minN === nT) heights[(y - 1) * size + x] += transfer;
-              else if (minN === nB) heights[(y + 1) * size + x] += transfer;
-              else if (minN === nL) heights[y * size + (x - 1)] += transfer;
-              else heights[y * size + (x + 1)] += transfer;
+              let target = (y - 1) * size + x;
+              if (minN === nB) target = (y + 1) * size + x;
+              else if (minN === nL) target = y * size + (x - 1);
+              else if (minN === nR) target = y * size + (x + 1);
+              delta[i] -= transfer;
+              delta[target] += transfer;
             }
           }
         }
+        for (let i = 0; i < heights.length; i++) heights[i] = clamp(heights[i] + delta[i]);
       }
     }
 
@@ -268,8 +271,24 @@
     for (let i = 1; i < points.length - 1; i++) if (Math.hypot(points[i].x - last.x, points[i].y - last.y) >= minDistance) { out.push(points[i]); last = points[i]; }
     out.push(points.at(-1)); return out;
   }
+  function roundPath(points, passes = 1) {
+    let path = points;
+    for (let pass = 0; pass < passes && path.length > 2; pass++) {
+      const rounded = [path[0]];
+      for (let i = 1; i < path.length; i++) {
+        const a = path[i - 1], b = path[i];
+        rounded.push({ x: lerp(a.x, b.x, .25), y: lerp(a.y, b.y, .25) }, { x: lerp(a.x, b.x, .75), y: lerp(a.y, b.y, .75) });
+      }
+      rounded.push(path.at(-1));
+      path = rounded;
+    }
+    return path;
+  }
   function buildDrainage(height, sea) {
     const count = height.length, filled = new Float32Array(count), parent = new Int32Array(count), seen = new Uint8Array(count);
+    const order = new Int32Array(count), accumulation = new Float32Array(count);
+    accumulation.fill(1);
+    let orderLength = 0;
     parent.fill(-1);
     const heapIds = [], heapLevels = [];
     const push = (id, level) => { let i = heapIds.length; heapIds.push(id); heapLevels.push(level); while (i > 0) { const p = (i - 1) >> 1; if (heapLevels[p] <= level) break; heapIds[i] = heapIds[p]; heapLevels[i] = heapLevels[p]; i = p; } heapIds[i] = id; heapLevels[i] = level; };
@@ -278,6 +297,7 @@
     for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (x === 0 || y === 0 || x === SIZE - 1 || y === SIZE - 1 || height[y * SIZE + x] < sea) addOutlet(y * SIZE + x);
     while (heapIds.length) {
       const [id, level] = pop(), x = id % SIZE, y = (id / SIZE) | 0;
+      order[orderLength++] = id;
       for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
         if (!ox && !oy) continue; const nx = x + ox, ny = y + oy;
         if (nx < 0 || ny < 0 || nx >= SIZE || ny >= SIZE) continue;
@@ -285,10 +305,16 @@
         seen[next] = 1; filled[next] = Math.max(height[next], level + .00001); parent[next] = id; push(next, filled[next]);
       }
     }
-    return parent;
+    // Each cell contributes its catchment to the next lower cell. Reversing
+    // priority-flood order visits upstream cells before their receivers.
+    for (let i = orderLength - 1; i >= 0; i--) {
+      const id = order[i], receiver = parent[id];
+      if (receiver >= 0) accumulation[receiver] += accumulation[id];
+    }
+    return { parent, accumulation };
   }
   function buildRiverPaths(seed, height, sea, terrain, requested = 3) {
-    const parent = buildDrainage(height, sea), rand = mulberry32(seed ^ 0x71d3a9), candidates = [];
+    const { parent, accumulation } = buildDrainage(height, sea), rand = mulberry32(seed ^ 0x71d3a9), candidates = [];
     const cutoff = Math.min(.88, sea + (terrain === 'dunes' ? .55 : .18));
     for (let y = 3; y < SIZE - 3; y += 2) for (let x = 3; x < SIZE - 3; x += 2) {
       const id = y * SIZE + x, h = height[id]; if (h < cutoff) continue;
@@ -300,38 +326,81 @@
     for (const candidate of candidates) {
       const sx = candidate.id % SIZE, sy = (candidate.id / SIZE) | 0;
       if (sources.some(p => Math.hypot(p.x - sx, p.y - sy) < SIZE * .19)) continue;
-      let id = candidate.id, path = [], pathCells = [], steps = 0;
+      let id = candidate.id, path = [], pathCells = [], steps = 0, peakFlow = 0;
       while (id >= 0 && steps++ < SIZE * 2) {
+        // Stop before adding the first sea cell so river overlays and carved
+        // channels end at the shoreline instead of drawing into the ocean.
+        if (height[id] < sea) break;
         const x = id % SIZE, y = (id / SIZE) | 0; path.push({ x: x / (SIZE - 1), y: y / (SIZE - 1) });
-        pathCells.push(id);
+        pathCells.push(id); peakFlow = Math.max(peakFlow, accumulation[id]);
         if (usedCells[id] && path.length >= 18) break;
-        if (height[id] < sea || parent[id] < 0) break;
+        if (parent[id] < 0) break;
         id = parent[id];
       }
-      if (path.length < 18) continue;
+      // Ignore tiny headwater paths that carry too little contributing area.
+      if (path.length < 18 || peakFlow < SIZE * SIZE * .00008) continue;
       sources.push({ x: sx, y: sy });
       path.reverse(); const smoothPath = simplifyPath(path, .009);
-      paths.push({ type: 'river', pts: smoothPath, width: .0045 + rand() * .0025 });
+      const width = clamp(.003 + Math.log1p(peakFlow) * .00038, .003, .0085);
+      paths.push({ type: 'river', pts: smoothPath, width, flow: peakFlow });
       for (const cell of pathCells) usedCells[cell] = 1;
       if (paths.length >= desired) break;
     }
     return paths;
   }
   function findDryCell(height, sea, x, y) {
+    const N = 96;
     let best = null, bestCost = Infinity;
-    const gx = clamp(Math.round(x * 63), 0, 63), gy = clamp(Math.round(y * 63), 0, 63);
-    for (let radius = 0; radius < 22; radius++) for (let oy = -radius; oy <= radius; oy++) for (let ox = -radius; ox <= radius; ox++) {
+    const gx = clamp(Math.round(x * (N - 1)), 0, N - 1), gy = clamp(Math.round(y * (N - 1)), 0, N - 1);
+    for (let radius = 0; radius < 28; radius++) for (let oy = -radius; oy <= radius; oy++) for (let ox = -radius; ox <= radius; ox++) {
       if (radius && Math.max(Math.abs(ox), Math.abs(oy)) !== radius) continue;
-      const cx = gx + ox, cy = gy + oy; if (cx < 0 || cy < 0 || cx >= 64 || cy >= 64) continue;
-      const wx = cx / 63, wy = cy / 63, ix = Math.round(wx * (SIZE - 1)), iy = Math.round(wy * (SIZE - 1));
+      const cx = gx + ox, cy = gy + oy; if (cx < 0 || cy < 0 || cx >= N || cy >= N) continue;
+      const wx = cx / (N - 1), wy = cy / (N - 1), ix = Math.round(wx * (SIZE - 1)), iy = Math.round(wy * (SIZE - 1));
       if (height[iy * SIZE + ix] < sea + .025) continue;
       const cost = Math.hypot(wx - x, wy - y) + Math.abs(height[iy * SIZE + ix] - height[Math.round(clamp(y) * (SIZE - 1)) * SIZE + Math.round(clamp(x) * (SIZE - 1))]) * .08;
       if (cost < bestCost) { bestCost = cost; best = { x: wx, y: wy, cx, cy }; }
     }
     return best;
   }
+  function findLakeBasins(height, sea, count, occupied = []) {
+    if (!count) return [];
+    const stride = Math.max(2, Math.floor(SIZE / 96)), candidates = [], lowlandFallbacks = [];
+    for (let y = stride * 2; y < SIZE - stride * 2; y += stride) for (let x = stride * 2; x < SIZE - stride * 2; x += stride) {
+      const h = height[y * SIZE + x];
+      if (h <= sea + .035) continue;
+      let lowest = true, rim = 0, slope = 0;
+      for (let oy = -2; oy <= 2; oy++) for (let ox = -2; ox <= 2; ox++) {
+        if (!ox && !oy) continue;
+        const neighbor = height[(y + oy * stride) * SIZE + x + ox * stride];
+        if (neighbor < h) lowest = false;
+        rim = Math.max(rim, neighbor - h);
+        slope += Math.abs(neighbor - h);
+      }
+      const gx = x / (SIZE - 1), gy = y / (SIZE - 1);
+      if (occupied.some(a => Math.hypot(a.x - gx, a.y - gy) < (a.radius || .025) * 2.2)) continue;
+      lowlandFallbacks.push({ x: gx, y: gy, score: h + slope / 24 * .6 });
+      // Prefer low enclosed ground with a noticeable surrounding rim.
+      if (lowest && rim >= .002) candidates.push({ x: gx, y: gy, score: h - Math.min(.08, rim) * .65 });
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    const chosen = [];
+    for (const candidate of candidates) {
+      if (chosen.some(a => Math.hypot(a.x - candidate.x, a.y - candidate.y) < .1)) continue;
+      chosen.push(candidate);
+      if (chosen.length >= count) break;
+    }
+    if (chosen.length < count) {
+      lowlandFallbacks.sort((a, b) => a.score - b.score);
+      for (const candidate of lowlandFallbacks) {
+        if (chosen.some(a => Math.hypot(a.x - candidate.x, a.y - candidate.y) < .1)) continue;
+        chosen.push(candidate);
+        if (chosen.length >= count) break;
+      }
+    }
+    return chosen;
+  }
   function routeRoad(height, sea, from, to, seed = 1, avoidAreas = [], rivers = [], allowRiverCrossing = false) {
-    const N = 64, total = N * N;
+    const N = 96, total = N * N;
     const areaBlocked = (x, y) => avoidAreas.some(a => !a.hidden && ['lake', 'mountain'].includes(a.type) && Math.hypot(x - a.x, y - a.y) < a.radius * (a.type === 'mountain' ? 1.7 : 1.45) + .012);
     const findRoadCell = (point) => {
       const gx = Math.round(clamp(point.x) * (N - 1)), gy = Math.round(clamp(point.y) * (N - 1));
@@ -340,7 +409,7 @@
         for (let oy = -radius; oy <= radius; oy++) for (let ox = -radius; ox <= radius; ox++) {
           if (radius && Math.max(Math.abs(ox), Math.abs(oy)) !== radius) continue;
           const x = gx + ox, y = gy + oy; if (x < 0 || y < 0 || x >= N || y >= N) continue;
-          const wx = x / 63, wy = y / 63, h = height[Math.round(wy * (SIZE - 1)) * SIZE + Math.round(wx * (SIZE - 1))];
+          const wx = x / (N - 1), wy = y / (N - 1), h = height[Math.round(wy * (SIZE - 1)) * SIZE + Math.round(wx * (SIZE - 1))];
           if (h < sea + .025 || areaBlocked(wx, wy)) continue;
           const d = Math.hypot(ox, oy); if (d < bestDistance) { best = { x: wx, y: wy, cx: x, cy: y }; bestDistance = d; }
         }
@@ -360,15 +429,15 @@
     cost[source] = 0; push(source, heuristic(source));
     while (heap.length) {
       const [id] = pop(); if (closed[id]) continue; if (id === target) break; closed[id] = 1;
-      const x = id % N, y = (id / N) | 0, ix = Math.round(x / 63 * (SIZE - 1)), iy = Math.round(y / 63 * (SIZE - 1)), h0 = height[iy * SIZE + ix];
+      const x = id % N, y = (id / N) | 0, ix = Math.round(x / (N - 1) * (SIZE - 1)), iy = Math.round(y / (N - 1) * (SIZE - 1)), h0 = height[iy * SIZE + ix];
       for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
         if (!ox && !oy) continue; const nx = x + ox, ny = y + oy; if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
-        const next = ny * N + nx, sx = Math.round(nx / 63 * (SIZE - 1)), sy = Math.round(ny / 63 * (SIZE - 1)), h1 = height[sy * SIZE + sx];
-        if (h1 < sea + .01 || closed[next] || areaBlocked(nx / 63, ny / 63)) continue;
+        const next = ny * N + nx, sx = Math.round(nx / (N - 1) * (SIZE - 1)), sy = Math.round(ny / (N - 1) * (SIZE - 1)), h1 = height[sy * SIZE + sx];
+        if (h1 < sea + .01 || closed[next] || areaBlocked(nx / (N - 1), ny / (N - 1))) continue;
         const step = Math.hypot(ox, oy), slope = Math.abs(h1 - h0);
         // Small seeded terrain roughness breaks up the geometric shortest path
         // while preserving a preference for gentle slopes and dry ground.
-        const wx = nx / 63, wy = ny / 63, wander = gradNoise(wx * 8, wy * 8, seed) * 2.1;
+        const wx = nx / (N - 1), wy = ny / (N - 1), wander = gradNoise(wx * 8, wy * 8, seed) * 2.1;
         const riverClearance = riverDistance(wx, wy);
         if (!allowRiverCrossing && riverClearance < .009) continue;
         const riverPenalty = riverClearance < .018 ? (1 - riverClearance / .018) * (allowRiverCrossing ? 65 : 28) : 0;
@@ -379,15 +448,10 @@
     }
     if (source !== target && parent[target] < 0) return [];
     const path = []; let id = target, guard = 0;
-    while (id >= 0 && guard++ < total) { path.push({ x: (id % N) / 63, y: Math.floor(id / N) / 63 }); if (id === source) break; id = parent[id]; }
+    while (id >= 0 && guard++ < total) { path.push({ x: (id % N) / (N - 1), y: Math.floor(id / N) / (N - 1) }); if (id === source) break; id = parent[id]; }
     if (path.length < 2 || id < 0) return [];
     path.reverse();
-    const curved = [path[0]];
-    for (let i = 1; i < path.length; i++) {
-      const a = path[i - 1], b = path[i];
-      curved.push({ x: lerp(a.x, b.x, .25), y: lerp(a.y, b.y, .25) }, { x: lerp(a.x, b.x, .75), y: lerp(a.y, b.y, .75) });
-    }
-    curved.push(path.at(-1));
+    const curved = roundPath(path, 2);
     const valid = point => {
       const ix = Math.round(point.x * (SIZE - 1)), iy = Math.round(point.y * (SIZE - 1));
       return height[iy * SIZE + ix] >= sea + .01 && !areaBlocked(point.x, point.y) && (allowRiverCrossing || riverDistance(point.x, point.y) >= .009);
@@ -461,10 +525,10 @@
     for (let i = 0; i < nCities + nVillages; i++) {
       const village = i >= nCities;
       const x = .22 + rand() * .56, y = .22 + rand() * .56;
-      areas.push({ type: village ? 'village' : 'city', x, y, radius: village ? .025 + rand() * .01 : .046 + rand() * .018 });
+      areas.push({ type: village ? 'village' : 'city', x, y, radius: village ? .025 + rand() * .01 : .046 + rand() * .018, automatic: true });
     }
-    for (let i = 0; i < state.features.lakes; i++) areas.push({ type: 'lake', x: .23 + rand() * .54, y: .2 + rand() * .6, radius: .015 + rand() * .018 });
-    for (let i = 0; i < state.features.peaks; i++) areas.push({ type: 'mountain', x: .17 + rand() * .66, y: .17 + rand() * .66, radius: .018 + rand() * .025 });
+    for (let i = 0; i < state.features.lakes; i++) areas.push({ type: 'lake', x: .23 + rand() * .54, y: .2 + rand() * .6, radius: .015 + rand() * .018, automatic: true });
+    for (let i = 0; i < state.features.peaks; i++) areas.push({ type: 'mountain', x: .17 + rand() * .66, y: .17 + rand() * .66, radius: .018 + rand() * .025, angle: rand() * Math.PI, automatic: true });
     return { areas };
   }
   function generate() {
@@ -490,20 +554,36 @@
         const moisture = new Float32Array(SIZE * SIZE), temp = new Float32Array(SIZE * SIZE);
         const sampleBase = (x, y) => heights[Math.round(clamp(y) * (SIZE - 1)) * SIZE + Math.round(clamp(x) * (SIZE - 1))];
         const isDry = (x, y) => sampleBase(x, y) > cfg.sea + .025;
+        const worldKm = ({ 505: 1, 1009: 2, 2017: 4, 4033: 8 })[state.size] || 4;
+        const slopeAt = (x, y) => {
+          const step = Math.max(1, Math.round(SIZE * .003));
+          const cx = Math.round(clamp(x) * (SIZE - 1)), cy = Math.round(clamp(y) * (SIZE - 1));
+          const left = heights[cy * SIZE + Math.max(0, cx - step)], right = heights[cy * SIZE + Math.min(SIZE - 1, cx + step)];
+          const top = heights[Math.max(0, cy - step) * SIZE + cx], bottom = heights[Math.min(SIZE - 1, cy + step) * SIZE + cx];
+          return Math.hypot(right - left, bottom - top) * (SIZE - 1) / (2 * step) * cfg.peak / (worldKm * 1000);
+        };
         const settlements = [], placedAreas = [];
+        const automaticLakes = areas.filter(a => a.type === 'lake' && a.automatic);
+        const lakeBasins = findLakeBasins(heights, cfg.sea, automaticLakes.length, areas.filter(a => !(a.type === 'lake' && a.automatic)));
+        automaticLakes.forEach((lake, i) => { if (lakeBasins[i]) { lake.x = lakeBasins[i].x; lake.y = lakeBasins[i].y; } });
         for (const a of areas) {
           const needsLand = ['city', 'village', 'mountain', 'lake'].includes(a.type);
           const conflicts = (x, y) => placedAreas.some(b => Math.hypot(b.x - x, b.y - y) < (b.radius + a.radius) * 1.22);
           if (!needsLand) continue;
-          if (isDry(a.x, a.y) && !conflicts(a.x, a.y)) { placedAreas.push(a); if (['city', 'village'].includes(a.type)) settlements.push(a); continue; }
+          const settlement = ['city', 'village'].includes(a.type);
+          const suitableSite = (x, y) => isDry(x, y) && !conflicts(x, y) && (!settlement || slopeAt(x, y) < .16);
+          if (suitableSite(a.x, a.y)) { placedAreas.push(a); if (settlement) settlements.push(a); continue; }
           let found = null;
           for (let radius = .012; radius <= .85 && !found; radius += .012) {
             const steps = Math.max(16, Math.ceil(radius * SIZE * 6));
-            for (let step = 0; step < steps; step++) { const angle = step / steps * Math.PI * 2, x = a.x + Math.cos(angle) * radius, y = a.y + Math.sin(angle) * radius; if (x <= .02 || x >= .98 || y <= .02 || y >= .98 || !isDry(x, y) || conflicts(x, y)) continue; found = { x, y }; break; }
+            let best = null, bestSlope = Infinity;
+            for (let step = 0; step < steps; step++) { const angle = step / steps * Math.PI * 2, x = a.x + Math.cos(angle) * radius, y = a.y + Math.sin(angle) * radius; if (x <= .02 || x >= .98 || y <= .02 || y >= .98 || !isDry(x, y) || conflicts(x, y)) continue; const slope = settlement ? slopeAt(x, y) : 0; if (slope < bestSlope) { best = { x, y }; bestSlope = slope; } }
+            if (best && (!settlement || bestSlope < .16)) found = best;
           }
-          if (found) { a.x = found.x; a.y = found.y; placedAreas.push(a); if (['city', 'village'].includes(a.type)) settlements.push(a); }
+          if (found) { a.x = found.x; a.y = found.y; placedAreas.push(a); if (settlement) settlements.push(a); }
           else a.hidden = true;
         }
+        for (const a of areas) if (['city', 'village'].includes(a.type)) a.flatTarget = clamp(sampleBase(a.x, a.y), cfg.sea + .04, .92);
         const generatedRivers = cfg.auto && state.features.rivers ? buildRiverPaths(seed, heights, cfg.sea, state.terrain, state.features.rivers) : [];
         features.push(...generatedRivers);
         let generatedRoads = [];
@@ -516,9 +596,21 @@
           if (h > cfg.sea) for (const a of areas) {
             if (a.hidden) continue;
             const d = Math.hypot(nx - a.x, ny - a.y), t = Math.exp(-Math.pow(d / a.radius, 2));
-            if (a.type === 'mountain') h = clamp(h + t * .28);
-            if ((a.type === 'city' || a.type === 'village') && cfg.flatten && t > .01) h = lerp(h, Math.min(.92, Math.max(cfg.sea + .04, .32 + fractal(nx * 4, ny * 4, seed) * .025)), t * .96);
-            if (a.type === 'lake' && d < a.radius && !settlements.some(s => Math.hypot(nx - s.x, ny - s.y) < s.radius * 1.25)) h = Math.min(h, cfg.sea * .93);
+            if (a.type === 'mountain') {
+              const angle = a.angle ?? ((a.x * 997 + a.y * 239) % Math.PI), dx = nx - a.x, dy = ny - a.y;
+              const along = (dx * Math.cos(angle) + dy * Math.sin(angle)) / a.radius;
+              const across = (-dx * Math.sin(angle) + dy * Math.cos(angle)) / (a.radius * .42);
+              if (Math.abs(along) < 2.6 && Math.abs(across) < 2.6) {
+                const ridge = Math.exp(-(along * along + across * across));
+                const roughness = (fractal(nx * 18, ny * 18, seed ^ Math.round(a.x * 8192), 3) - .5) * .07;
+                h = clamp(h + ridge * (.22 + roughness));
+              }
+            }
+            if ((a.type === 'city' || a.type === 'village') && cfg.flatten && t > .01) h = lerp(h, a.flatTarget, t * .96);
+            if (a.type === 'lake' && d < a.radius && !settlements.some(s => Math.hypot(nx - s.x, ny - s.y) < s.radius * 1.25)) {
+              const bowl = 1 - smooth(a.radius * .58, a.radius, d);
+              h = lerp(h, cfg.sea * .93, bowl);
+            }
           }
           if (h > cfg.sea) for (const f of features) if (f.type === 'river') {
             const d = distToPath(nx, ny, f.pts);
@@ -537,9 +629,13 @@
           const h = heights[idx];
           const xP = Math.max(0, x - 1), xN = Math.min(SIZE - 1, x + 1);
           const windSlope = (heights[y * SIZE + xN] - heights[y * SIZE + xP]) * 5;
-          const orographic = windSlope > 0 ? windSlope * 0.22 : windSlope * 0.16;
+          const orographic = windSlope > 0 ? windSlope * 0.3 : windSlope * 0.1;
           const coastal = (h > cfg.sea && h < cfg.sea + 0.05) ? (1 - (h - cfg.sea) / 0.05) * 0.12 : 0;
-          let m = clamp(.52 + (fractal(nx * 4 + 30, ny * 4 - 9, seed ^ 719) - .5) * .85 + orographic + coastal - nx * .09);
+          const upwindX = Math.max(0, x - Math.max(2, Math.round(SIZE * .035)));
+          const upwind = heights[y * SIZE + upwindX];
+          const leeDrying = Math.max(0, upwind - h) * .28;
+          const climateWarp = (fractal(nx * 1.6 + 17, ny * 1.6 - 6, seed ^ 0x4c3, 3) - .5) * .32;
+          let m = clamp(.5 + (fractal((nx + climateWarp) * 2.7 + 30, (ny - climateWarp * .7) * 2.7 - 9, seed ^ 719, 4) - .5) * .72 + orographic + coastal - leeDrying);
           if (h > cfg.sea) {
             for (const f of features) {
               if (f.type === 'river') {
@@ -555,7 +651,12 @@
             }
           }
           moisture[idx] = m;
-          temp[idx] = clamp(.92 - Math.abs(ny - .5) * .9 - h * .45 + (fractal(nx * 2, ny * 2, seed ^ 493) - .5) * .12);
+          const warpedLatitude = clamp(ny + climateWarp);
+          const latitudeC = 30 - Math.abs(warpedLatitude - .5) * 74;
+          const elevationM = Math.max(0, (h - cfg.sea) / Math.max(.01, 1 - cfg.sea)) * cfg.peak;
+          const regionalClimate = (fractal(nx * 1.8 + climateWarp, ny * 1.8, seed ^ 493, 4) - .5) * 30;
+          const localClimate = (fractal(nx * 4, ny * 4, seed ^ 0x91b, 3) - .5) * 12;
+          temp[idx] = clamp((latitudeC + regionalClimate + localClimate - elevationM * .0065 + 20) / 55);
         }
         state.height = heights; state.wet = moisture; state.temp = temp; state.featuresGenerated = features; state.areasGenerated = areas; state.elevation = cfg.peak;
         const placedTypeCount = type => auto.areas.filter(a => a.type === type && !a.hidden).length;
@@ -610,6 +711,32 @@
       if (h < sea) assignWater(i);
       else state.biomeMap[i] = bestMatch(landCandidates, i);
     }
+    smoothBiomeRegions(sea);
+  }
+  function smoothBiomeRegions(sea) {
+    if (SIZE < 3 || !state.biomeMap) return;
+    const source = state.biomeMap, result = new Uint8Array(source);
+    const offsets = [-SIZE, 1, SIZE, -1];
+    for (let y = 1; y < SIZE - 1; y++) for (let x = 1; x < SIZE - 1; x++) {
+      const i = y * SIZE + x, water = state.height[i] < sea;
+      const center = source[i];
+      let winner = center, winnerCount = 1;
+      for (let j = 0; j < offsets.length; j++) {
+        const neighbor = i + offsets[j];
+        if ((state.height[neighbor] < sea) !== water) continue;
+        const biome = source[neighbor];
+        let count = biome === center ? 1 : 0;
+        for (let k = 0; k < offsets.length; k++) {
+          const other = i + offsets[k];
+          if ((state.height[other] < sea) === water && source[other] === biome) count++;
+        }
+        if (count > winnerCount) { winner = biome; winnerCount = count; }
+      }
+      // Suppress isolated one-cell patches while keeping narrow ecological
+      // boundaries and all land/water edges intact.
+      if (winner !== center && winnerCount >= 4) result[i] = winner;
+    }
+    state.biomeMap = result;
   }
   function isWaterBiome(biome) {
     if (String(biome.name).trim().toLowerCase() === 'ocean') return true;
